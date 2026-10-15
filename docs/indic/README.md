@@ -9,10 +9,12 @@ Working notes for adding Indian-language support to KittenTTS 2. This is a brain
 | [evaluation.md](evaluation.md) | Baseline models, metrics, ASR choice, benchmark harness for the HPC |
 | [finetuning.md](finetuning.md) | Weights license, what is trainable, codec suitability, current Indic bugs in the code |
 | [training.md](training.md) | The training plan: data prep, stages, QAT, compute estimate, open questions |
+| [sarvam-experiment.md](sarvam-experiment.md) | **The main experiment: replace Qwen3 with the Sarvam-1 tokenizer entirely** |
 
 ## Summary (2026-10-15)
 
-- **Tokenizer:** Qwen3 splits Indic text into 5–11 tokens per word, while Sarvam-1 needs about 2. Even so, no speech-LM TTS model has swapped its text tokenizer, and Sarvam-1's tokenizer is non-commercial. Plan: fine-tune with Qwen3 first. If Tamil and Telugu still lag, add vocab rows at the end of the table using our own tokenizer.
+- **Decision (2026-10-15):** the experiment uses the **Sarvam-1 tokenizer only**, with no Qwen3 text vocab, and keeps a Qwen3 fine-tune as the control arm. See [sarvam-experiment.md](sarvam-experiment.md).
+- **Tokenizer research:** Qwen3 splits Indic text into 5–11 tokens per word, while Sarvam-1 needs about 2. Even so, no speech-LM TTS model has swapped its text tokenizer, and Sarvam-1's tokenizer is non-commercial. Plan: fine-tune with Qwen3 first. If Tamil and Telugu still lag, add vocab rows at the end of the table using our own tokenizer.
 - **License:** the Stellon Labs Community License allows fine-tunes and releasing derivative weights. Commercial use requires registering, and the license ends above $1M revenue or $1M funding.
 - **Trainable:** the HF repo ships a bf16 `lm/model.safetensors` (Qwen3ForCausalLM). Its linear layers must stay ternary, so training needs quantization-aware training (QAT).
 - **Data:** about 800–900 h of clean, CC-BY data exists for hi/bn/ta/te/mr: SYSPIN, Rasa, IndicTTS and IndicVoices-R.
