@@ -41,10 +41,12 @@ import glob
 import itertools
 import json
 import pathlib
+import shutil
 import sys
 import tempfile
 import time
 
+import numpy as np
 import torch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
@@ -924,6 +926,113 @@ def _inference_hook_probe(device):
 
 
 # ── driver ────────────────────────────────────────────────────────────────────
+def check_shard_reader(ctx):
+    """The parquet reader produces the same well-formed examples as the synthetic one.
+
+    `SyntheticDataset` is what every other check runs against, so it is the one
+    thing in this suite that real data will replace. If `ShardDataset` disagrees
+    with it about layout, masking or padding, every guarantee the other checks
+    establish stops applying the moment a corpus arrives -- and nothing would
+    say so.
+
+    Round-tripped through a real parquet file rather than mocked, because the
+    schema is the contract that drifts: the reader and the preprocessing job are
+    separate programs, and a renamed column is read as the old one.
+    """
+    import tempfile
+
+    from indic.train.shard_schema import SPEAKER_EMBEDDING_DIM, write_shard
+
+    # A tiny token map rather than the model factory's: this check never runs a
+    # forward pass, so building a model to read one dataclass off it would be
+    # the most expensive line in the suite.
+    token_map = data.tiny_token_map()
+    rng = np.random.default_rng(11)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="kindic-shard-"))
+    detail = {}
+
+    # Two shards, uneven languages, every speaker holding several utterances so
+    # a reference that is not the target always exists.
+    rows = []
+    for lang, speakers, per_speaker in (("hi", 4, 6), ("ta", 2, 4), ("en", 2, 4)):
+        for speaker in range(speakers):
+            for utterance in range(per_speaker):
+                vector = rng.standard_normal(SPEAKER_EMBEDDING_DIM).astype(np.float32)
+                rows.append({
+                    "utt_id": f"{lang}-{speaker}-{utterance}",
+                    "language": lang, "speaker_id": f"{lang}spk{speaker}",
+                    "text_ids": rng.integers(0, token_map.speech_start_id,
+                                             size=int(rng.integers(5, 20))).tolist(),
+                    "audio_tokens": rng.integers(0, token_map.num_audio_tokens,
+                                                 size=int(rng.integers(40, 160))).tolist(),
+                    "speaker_embedding": (vector / np.linalg.norm(vector)).tolist(),
+                    "duration_s": float(rng.uniform(3, 12)), "cer": 0.02,
+                    "emotion": None})
+    half = len(rows) // 2
+    write_shard(tmp / "part-0.parquet", rows[:half], tokenizer="selfcheck")
+    write_shard(tmp / "part-1.parquet", rows[half:], tokenizer="selfcheck")
+    detail["rows_written"] = len(rows)
+
+    dataset = data.ShardDataset(tmp, token_map, tokenizer="selfcheck", seed=7)
+    detail["rows_read"] = len(dataset)
+    read_all = len(dataset) == len(rows)
+
+    # The mask, derived independently from the token stream, must agree on every
+    # example -- the same property check_loss_mask proves for the synthetic set.
+    disagreements = 0
+    for index in range(len(dataset)):
+        item = dataset[index]
+        span = data.supervised_span(item["input_ids"], token_map)
+        supervised = (item["labels"] != data.IGNORE_INDEX).nonzero().flatten()
+        if span is None or supervised.numel() == 0:
+            disagreements += 1
+        elif (int(supervised[0]), int(supervised[-1])) != span:
+            disagreements += 1
+    detail["mask_disagreements"] = disagreements
+
+    first = dataset[0]
+    starts_with_start = int(first["input_ids"][0]) == token_map.start_id
+    unit_norm = abs(float(first["speaker_embedding"].norm()) - 1.0) < 1e-4
+
+    # Determinism, and that a new epoch genuinely re-pairs the references.
+    epoch0 = [dataset[i]["input_ids"].tolist() for i in range(6)]
+    repeat = [dataset[i]["input_ids"].tolist() for i in range(6)]
+    dataset.set_epoch(1)
+    epoch1 = [dataset[i]["input_ids"].tolist() for i in range(6)]
+    dataset.set_epoch(0)
+    restored = [dataset[i]["input_ids"].tolist() for i in range(6)]
+    detail["same_epoch_identical"] = epoch0 == repeat
+    detail["new_epoch_repairs"] = epoch0 != epoch1
+    detail["epoch_restores"] = epoch0 == restored
+
+    # Right padding, through the real collator: START must stay at index 0 for
+    # every row, since speaker.py writes the speaker vector there unconditionally.
+    batch = data.Collator()([dataset[i] for i in range(4)])
+    start_aligned = bool((batch["input_ids"][:, 0] == token_map.start_id).all())
+    supervised_on_pad = bool(((batch["labels"] != data.IGNORE_INDEX)
+                              & (batch["attention_mask"] == 0)).any())
+    detail["start_at_index_0"] = start_aligned
+    detail["supervised_position_on_padding"] = supervised_on_pad
+
+    # A shard written for another tokenizer means different strings; refusing it
+    # is the whole reason the tokenizer is in the file metadata.
+    try:
+        data.ShardDataset(tmp, token_map, tokenizer="a-different-tokenizer")
+        refuses_mismatch = False
+    except ValueError:
+        refuses_mismatch = True
+    detail["refuses_tokenizer_mismatch"] = refuses_mismatch
+
+    shutil.rmtree(tmp, ignore_errors=True)
+    passed = (read_all and disagreements == 0 and starts_with_start and unit_norm
+              and detail["same_epoch_identical"] and detail["new_epoch_repairs"]
+              and detail["epoch_restores"] and start_aligned
+              and not supervised_on_pad and refuses_mismatch)
+    return Result("shard_reader", passed, detail,
+                  "round-tripped through real parquet; mask derived independently, "
+                  "as in loss_masking")
+
+
 CHECKS = [
     ("overfit_one_batch", check_overfit),
     ("loss_masking", check_loss_mask),
@@ -933,6 +1042,7 @@ CHECKS = [
     ("determinism", check_determinism),
     ("checkpoint_resume", check_resume),
     ("speaker_conditioning", check_speaker),
+    ("shard_reader", check_shard_reader),
 ]
 
 # Checks that run many optimizer steps. On the released 28-layer model that is
