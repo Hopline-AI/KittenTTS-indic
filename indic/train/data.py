@@ -420,12 +420,11 @@ class ShardDataset(torch.utils.data.Dataset):
         if use_reference:
             reference_text = self._text(reference)
             reference_audio = self._audio(reference)
-            if self.reference_max_tokens:
-                # Truncate rather than drop the example. The reference is
-                # conditioning, so a shorter one is a weaker signal; dropping the
-                # row would throw away a target that is perfectly trainable, and
-                # it is always the long references that would go.
-                reference_audio = reference_audio[:self.reference_max_tokens]
+            if self.reference_max_tokens and len(reference_audio) > self.reference_max_tokens:
+                # Too long: train this target without a reference. Truncating the
+                # audio would leave the full transcript describing speech that is
+                # no longer in the prompt.
+                reference_text = reference_audio = None
 
         audio = self._audio(row)
         input_ids, labels = build_example(

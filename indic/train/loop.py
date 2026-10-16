@@ -535,7 +535,12 @@ def run_steps(model, batches, optimizer, scheduler, args, device, start_step=0,
 
     history = []
     model.train()
+    budget_end = time.time() + 60 * getattr(args, "time_budget_min", 0) \
+        if getattr(args, "time_budget_min", 0) else None
     for step in range(start_step, args.steps):
+        if budget_end is not None and time.time() > budget_end:
+            print(f"time budget reached at step {step}; stopping", flush=True)
+            break
         optimizer.zero_grad(set_to_none=True)
         total = 0.0
         started, tokens, slots = time.perf_counter(), 0, 0
@@ -763,6 +768,8 @@ def parse_args(argv=None):
     ap.add_argument("--ddp-find-unused", action="store_true",
                     help="only needed if a mode leaves a trainable parameter off the graph")
     ap.add_argument("--resume", help="checkpoint to continue from")
+    ap.add_argument("--time-budget-min", type=float, default=0,
+                    help="stop after this many minutes, then save and export as usual")
     ap.add_argument("--out", help="directory for checkpoints and train.jsonl")
     args = ap.parse_args(argv)
     if args.amp == "auto":
