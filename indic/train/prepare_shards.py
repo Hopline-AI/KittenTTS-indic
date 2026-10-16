@@ -178,6 +178,9 @@ class Encoders:
             "duration_s": duration,
             "cer": cer,
             "emotion": record.get("emotion"),
+            # Absolute, so a shard stays readable from a different working
+            # directory -- which is the normal case on a cluster.
+            "audio_path": str(pathlib.Path(path).resolve()),
         }, None
 
 

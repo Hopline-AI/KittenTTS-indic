@@ -22,7 +22,7 @@
       "qat_absmax_passed": true,
       "zero_lr_control_delta": 0.0,
       "zero_lr_control_flat": true,
-      "seconds": 3.86
+      "seconds": 3.83
     },
     {
       "check": "loss_masking",
@@ -75,7 +75,7 @@
         "spk_proj_grad_abs_sum": 43.25605392456055,
         "passed": true
       },
-      "seconds": 0.72
+      "seconds": 0.59
     },
     {
       "check": "qat_fixed_point",
@@ -165,7 +165,7 @@
         },
         "negative_controls_all_rejected": true
       },
-      "seconds": 0.68
+      "seconds": 0.69
     },
     {
       "check": "pack_roundtrip",
@@ -190,7 +190,7 @@
         "exact": true
       },
       "export": {
-        "path": "/tmp/tmp4lkpcc6k/lm/model-ternary.safetensors",
+        "path": "/tmp/tmpeti23l6c/lm/model-ternary.safetensors",
         "packed_tensors": 14,
         "dense_tensors": 14,
         "tensors": 28,
@@ -198,7 +198,7 @@
         "missing": [],
         "passed": true
       },
-      "seconds": 0.41
+      "seconds": 0.42
     },
     {
       "check": "determinism",

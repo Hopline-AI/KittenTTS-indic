@@ -267,17 +267,37 @@ class ShardDataset(torch.utils.data.Dataset):
         self.duration_s = np.asarray(duration, dtype=np.float32)
         self.n_rows = len(self.utt_id)
 
+    # Character error rate of *human* recordings through the same recognizer,
+    # per language. A single absolute threshold is the wrong filter: a
+    # recognizer that scores real Tamil speakers at 4.87% and real Marathi
+    # speakers at 2.08% is applying very different strictness to the two
+    # languages, so a flat 15% cut keeps clips up to 3x the floor in Tamil and
+    # 7x in Marathi. Published floors, to be re-measured for our own decoder and
+    # normalizer before they are relied on.
+    ASR_FLOOR_CER = {"ta": 0.0487, "hi": 0.0521, "te": 0.0307, "mr": 0.0208,
+                     "bn": 0.0300, "en": 0.0133}
+    FLOOR_MULTIPLE = 3.0
+
     def _filter(self, min_audio, max_audio, max_cer, languages):
         """Row indices worth training on.
 
         A clip too short carries no prosody and a clip too long blows the token
         budget; `cer` is the preprocessing job's own ASR agreement score, and
         -1 means it was never measured, which must not be read as perfect.
+
+        The error-rate cut is taken relative to each language's own floor rather
+        than as one absolute number, so the filter is equally strict everywhere.
+        `max_cer` becomes the ceiling on that ratio when it is given as a
+        multiple, or stays absolute for a language with no published floor.
         """
         lengths = np.diff(self.audio_off)
         keep = (lengths >= min_audio) & (lengths <= max_audio)
         measured = self.cer >= 0
-        keep &= ~measured | (self.cer <= max_cer)
+        thresholds = np.array([
+            min(max_cer, self.ASR_FLOOR_CER[lang] * self.FLOOR_MULTIPLE)
+            if lang in self.ASR_FLOOR_CER else max_cer
+            for lang in self.language])
+        keep &= ~measured | (self.cer <= thresholds)
         if languages:
             wanted = set(languages)
             keep &= np.array([lang in wanted for lang in self.language], dtype=bool)

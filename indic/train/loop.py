@@ -45,7 +45,8 @@ import torch.nn as nn
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from indic.train import load_kittentts2
-from indic.train.data import Collator, SyntheticDataset, tiny_token_map
+from indic.train.data import (Collator, ShardDataset, SyntheticDataset,
+                              tiny_token_map)
 from indic.train.qat import load_released_state, wrap_ternary
 
 _tokens = load_kittentts2("tokens")
@@ -587,15 +588,32 @@ def main(argv=None):
         # silently comes back zero.
         model.enable_input_require_grads()
 
-    dataset = SyntheticDataset(token_map, size=args.dataset_size,
-                               speaker_dim=args.speaker_dim, seed=args.seed)
+    if args.shards:
+        # Real corpus. The reader holds the whole thing in memory as flat
+        # buffers (about 1 GB for 125 hours), so every rank pays that once --
+        # cheap next to the model, and it buys true random access for the
+        # sampler.
+        dataset = ShardDataset(
+            args.shards, token_map, tokenizer=args.shard_tokenizer,
+            reference_probability=args.reference_probability,
+            language_temperature=args.language_temperature,
+            max_epochs_per_language=args.max_epochs_per_language,
+            languages=args.languages.split(",") if args.languages else None,
+            max_tokens=args.max_tokens or None, seed=args.seed)
+        if rank == 0:
+            print(json.dumps(dataset.describe(), indent=2, ensure_ascii=False),
+                  flush=True)
+    else:
+        dataset = SyntheticDataset(token_map, size=args.dataset_size,
+                                   speaker_dim=args.speaker_dim, seed=args.seed)
     sampler = None
     if world_size > 1:
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset, num_replicas=world_size, rank=rank, shuffle=True, seed=args.seed)
     loader = torch.utils.data.DataLoader(
         dataset, batch_size=args.batch_size, sampler=sampler, shuffle=sampler is None,
-        collate_fn=Collator(), drop_last=True)
+        collate_fn=Collator(), drop_last=True,
+        num_workers=args.workers, persistent_workers=args.workers > 0)
 
     if world_size > 1:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -658,6 +676,20 @@ def parse_args(argv=None):
     ap.add_argument("--grad-checkpointing", action="store_true")
     ap.add_argument("--lora-rank", type=int, default=64)
     ap.add_argument("--lora-alpha", type=int, default=128)
+    ap.add_argument("--shards", help="parquet shard directory or glob; omit for "
+                                     "the synthetic dataset")
+    ap.add_argument("--shard-tokenizer", default="sarvamai/sarvam-1",
+                    help="refuse shards whose text ids came from another "
+                         "tokenizer, since the ids would mean different strings")
+    ap.add_argument("--languages", default="", help="comma-separated subset")
+    ap.add_argument("--language-temperature", type=float, default=0.0,
+                    help="0 = uniform across languages, 1 = natural distribution")
+    ap.add_argument("--max-epochs-per-language", type=int, default=4,
+                    help="repeat ceiling that makes flat sampling safe")
+    ap.add_argument("--reference-probability", type=float, default=0.8)
+    ap.add_argument("--max-tokens", type=int, default=0,
+                    help="drop the reference prefix past this sequence length")
+    ap.add_argument("--workers", type=int, default=2, help="dataloader workers")
     ap.add_argument("--dataset-size", type=int, default=256)
     ap.add_argument("--speaker-dim", type=int, default=512)
     ap.add_argument("--seed", type=int, default=0)

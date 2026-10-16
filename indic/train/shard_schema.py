@@ -31,7 +31,7 @@ import json
 # Bumped when a column changes meaning. The reader refuses a shard whose version
 # it does not know, because the alternative is reading a renamed column as if it
 # were the old one.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 COLUMNS = {
     "utt_id": "string, unique within the corpus",
@@ -43,6 +43,7 @@ COLUMNS = {
     "duration_s": "float32, source clip duration",
     "cer": "float32, ASR agreement with the transcript; -1 when unmeasured",
     "emotion": "string or null, an expression tag such as 'joyful'",
+    "audio_path": "string, the source clip; a mel-based trainer reads it directly",
 }
 
 # The codec's frame rate. Stored here because the reader converts a token budget
@@ -73,6 +74,13 @@ def arrow_schema(tokenizer, embedding_dim=SPEAKER_EMBEDDING_DIM, extra=None):
             pa.field("duration_s", pa.float32()),
             pa.field("cer", pa.float32()),
             pa.field("emotion", pa.string()),
+            # Mel is not stored. At 100 bins and a 256-sample hop, ten seconds of
+            # mel is ~376 KB against ~1 KB of codec tokens -- 125 hours would be
+            # 17 GB of shards instead of 45 MB. A mel-based trainer (the F5
+            # family) computes it on the fly from this path, which costs a little
+            # CPU in the dataloader and keeps the shards small enough to copy
+            # around. Architecture is not yet decided, so the shards serve both.
+            pa.field("audio_path", pa.string()),
         ],
         metadata={k.encode(): str(v).encode() for k, v in metadata.items()},
     )
@@ -132,6 +140,7 @@ def write_shard(path, rows, tokenizer, embedding_dim=SPEAKER_EMBEDDING_DIM,
             "duration_s": [float(r["duration_s"]) for r in rows],
             "cer": [float(r.get("cer", -1.0)) for r in rows],
             "emotion": [r.get("emotion") for r in rows],
+            "audio_path": [str(r.get("audio_path") or "") for r in rows],
         },
         schema=schema,
     )
