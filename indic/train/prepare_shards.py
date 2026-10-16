@@ -239,6 +239,8 @@ def main():
             row, reason = encoders.encode(record, apply_fixes=not args.no_text_fixes)
         except Exception as exc:               # one unreadable clip must not end the job
             row, reason = None, f"{type(exc).__name__}: {exc}"
+            if skipped == 0:                     # the first one, in full, so a smoke run says why
+                print(f"  skip {record.get('utt_id')}: {reason}", flush=True)
         if row is None:
             skipped += 1
             reasons[reason.split(":")[0]] = reasons.get(reason.split(":")[0], 0) + 1
