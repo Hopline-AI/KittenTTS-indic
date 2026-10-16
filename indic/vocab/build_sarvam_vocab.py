@@ -298,7 +298,7 @@ def main():
     # `weights="packed"` from silently loading a checkpoint with the old vocab.
     for stale in ("lm_packed", "lm_emb4", "cpp"):
         config.pop(stale, None)
-    config["default_weights"] = "bf16"
+    config["default_weights"] = "full"  # the loader's name for plain lm/model*.safetensors
     config["tokenizer_source"] = args.tokenizer
     config["embedding_init"] = args.init
     json.dump(config, open(out / "config.json", "w"), indent=2)

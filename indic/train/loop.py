@@ -454,6 +454,36 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, map_location="c
     return state["step"]
 
 
+def export_repo(model, checkpoint, out):
+    """Write a repo dir `KittenTTS2` can load: the source repo with a bf16 lm/.
+
+    LoRA is merged and QAT shadows are folded to their ternary values first, so
+    every mode lands in the same plain-bf16 format `build_sarvam_vocab` writes.
+    Destructive to `model`; call it last.
+    """
+    import shutil
+    from safetensors.torch import save_file
+    from indic.train.qat import unwrap_ternary
+
+    module = model.module if hasattr(model, "module") else model
+    if hasattr(module, "merge_and_unload"):
+        module = module.merge_and_unload()
+    unwrap_ternary(module)
+    source, out = pathlib.Path(checkpoint).parent, pathlib.Path(out)
+    shutil.copytree(source, out, dirs_exist_ok=True,
+                    ignore=lambda d, names: [n for n in names if n == "cpp" or (
+                        pathlib.Path(d).name == "lm" and n.endswith(".safetensors"))])
+    state = {k: v.detach().to(torch.bfloat16).contiguous().cpu()
+             for k, v in module.state_dict().items() if k != "lm_head.weight"}
+    save_file(state, str(out / "lm" / "model.safetensors"), metadata={"format": "pt"})
+    config = json.loads((out / "config.json").read_text())
+    for stale in ("lm_packed", "lm_emb4", "cpp"):
+        config.pop(stale, None)
+    config["default_weights"] = "full"  # the loader's name for plain lm/model*.safetensors
+    (out / "config.json").write_text(json.dumps(config, indent=2))
+    return out
+
+
 class JsonlLogger:
     """One JSON object per line, flushed every write.
 
@@ -538,16 +568,26 @@ def run_steps(model, batches, optimizer, scheduler, args, device, start_step=0,
             on_step(step, record)
         if (args.save_every and args.out and (step + 1) % args.save_every == 0
                 and (not dist.is_initialized() or dist.get_rank() == 0)):
-            save_checkpoint(pathlib.Path(args.out) / f"step{step + 1}.pt",
-                            model, optimizer, scheduler, step + 1, args)
+            # ponytail: one rolling latest.pt (each is several GB); keep stepN copies by hand
+            latest = pathlib.Path(args.out) / "latest.pt"
+            save_checkpoint(latest.with_suffix(".tmp"), model, optimizer, scheduler,
+                            step + 1, args)
+            os.replace(latest.with_suffix(".tmp"), latest)
     return history
 
 
-def cycle(loader):
-    """An endless stream of batches, reshuffled each pass."""
+def cycle(loader, epoch=0):
+    """An endless stream of batches, reshuffled each pass.
+
+    Dataset before sampler: `ShardDataset.set_epoch` changes `len(dataset)`.
+    """
     while True:
+        for target in (loader.dataset, loader.sampler):
+            if hasattr(target, "set_epoch"):
+                target.set_epoch(epoch)
         for batch in loader:
             yield batch
+        epoch += 1
 
 
 def main(argv=None):
@@ -569,6 +609,12 @@ def main(argv=None):
         config_path = checkpoint_dir.parent / "config.json"
         token_map = _tokens.TokenMap.from_config(json.loads(config_path.read_text()))
         model = released_model(checkpoint_dir, dtype=dtype)
+        if args.shard_tokenizer is None:
+            # The checkpoint decides which tokenizer its text rows belong to; a
+            # Sarvam shard on the released Qwen table would index the wrong rows
+            # without any error.
+            args.shard_tokenizer = json.loads(config_path.read_text()).get(
+                "tokenizer_source", "KittenML/kitten-tts-2")
 
     if args.mode == "lora":
         model = apply_lora(model, rank=args.lora_rank, alpha=args.lora_alpha)
@@ -643,10 +689,13 @@ def main(argv=None):
     history = run_steps(model, cycle(loader), optimizer, scheduler, args, device,
                         start_step=start_step, logger=logger)
     if rank == 0:
-        print(f"first loss {history[0]:.4f}  last loss {history[-1]:.4f}")
+        if history:  # empty when a requeue resumes an already-finished run
+            print(f"first loss {history[0]:.4f}  last loss {history[-1]:.4f}")
         if args.out:
             save_checkpoint(pathlib.Path(args.out) / "final.pt", model, optimizer,
                             scheduler, args.steps, args)
+            if not args.toy:
+                print(f"exported -> {export_repo(model, args.checkpoint, pathlib.Path(args.out) / 'export')}")
     logger.close()
     return history
 
@@ -678,7 +727,7 @@ def parse_args(argv=None):
     ap.add_argument("--lora-alpha", type=int, default=128)
     ap.add_argument("--shards", help="parquet shard directory or glob; omit for "
                                      "the synthetic dataset")
-    ap.add_argument("--shard-tokenizer", default="sarvamai/sarvam-1",
+    ap.add_argument("--shard-tokenizer", default=None,
                     help="refuse shards whose text ids came from another "
                          "tokenizer, since the ids would mean different strings")
     ap.add_argument("--languages", default="", help="comma-separated subset")

@@ -48,17 +48,15 @@
 #SBATCH --output=logs/train-%j.out
 #SBATCH --error=logs/train-%j.err
 #
-# Checkpoint before preemption. Slurm sends USR1 to the batch script this many
-# seconds before the job is killed; the trap below forwards it to the training
-# process, which should save and exit. Remove both if your training loop does not
-# handle USR1 yet -- a signal nothing catches just kills the job sooner.
-#SBATCH --signal=B:USR1@180
+# Preemption: the loop writes $RUN_DIR/latest.pt every SAVE_EVERY steps and a
+# requeued job resumes from it, so at most SAVE_EVERY steps are lost.
 #SBATCH --requeue
 
 set -euo pipefail
 
 : "${STAGED_HF_HOME:?set STAGED_HF_HOME to the directory staged by indic.hpc.stage_cache}"
-: "${RUN_DIR:=runs/$(date +%Y%m%d)-${SLURM_JOB_ID:-local}}"
+: "${RUN_DIR:=runs/${SLURM_JOB_ID:-local}}"   # stable across requeues
+: "${SAVE_EVERY:=500}"
 : "${REPO_DIR:=$(pwd)}"
 : "${PYTHON:=python}"
 : "${ACTIVATE:=}"
@@ -102,10 +100,9 @@ echo "== preflight on $(hostname), $NPROC rank(s) =="
 "$PYTHON" -m indic.hpc.env_lock capture --out "$RUN_DIR/env.json" \
   --label "${SLURM_JOB_NAME:-train}"
 
-# The training entry point does not exist yet -- docs/indic/training.md is the
-# plan for it. Point TRAIN_MODULE at it once it does; the flags below are the
-# shape this template assumes.
-: "${TRAIN_MODULE:=indic.train.finetune}"
+: "${TRAIN_MODULE:=indic.train.loop}"
+RESUME=()
+[ -f "$RUN_DIR/latest.pt" ] && RESUME=(--resume "$RUN_DIR/latest.pt")
 
 # --standalone sets up a single-node rendezvous on localhost, which is what makes
 # this work unchanged from one GPU to eight.
@@ -114,12 +111,6 @@ torchrun \
   --nnodes=1 \
   --nproc_per_node="$NPROC" \
   -m "$TRAIN_MODULE" \
-  --run-dir "$RUN_DIR" \
-  "$@" &
-
-TRAIN_PID=$!
-# Forward the pre-emption signal to the training process rather than letting it
-# kill this script and orphan the ranks.
-trap 'echo "USR1: asking rank 0 to checkpoint"; kill -USR1 "$TRAIN_PID"' USR1
-wait "$TRAIN_PID"
+  --device cuda --out "$RUN_DIR" --save-every "$SAVE_EVERY" \
+  "${RESUME[@]}" "$@"
 echo "== done: $RUN_DIR =="
