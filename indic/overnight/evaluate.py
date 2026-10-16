@@ -16,6 +16,7 @@ import argparse
 import glob
 import json
 import math
+import os
 import pathlib
 import statistics
 import sys
@@ -241,6 +242,9 @@ def main():
     ap.add_argument("--dry", action="store_true", help="toy models (see prepare.py)")
     ap.add_argument("--report-only", action="store_true")
     args = ap.parse_args()
+    if not args.dry and os.environ.get("HF_HUB_OFFLINE") == "1":
+        from indic.overnight.prepare import use_staged_files
+        use_staged_files()                 # the samples' vocoder, by staged path
     error = None
     if not args.report_only:
         try:
