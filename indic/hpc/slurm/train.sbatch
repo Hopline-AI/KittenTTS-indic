@@ -43,7 +43,8 @@
 # Host RAM. A full fine-tune with AdamW is about 16 bytes/param, roughly 27 GB,
 # but that lives in VRAM; this is for the dataset shards, the dataloader workers
 # and the CPU-side unpack of the ternary checkpoint.
-#SBATCH --mem=128G
+# No --mem: eX3 nodes report RealMemory=1, so any --mem request is rejected.
+# On a cluster that tracks memory, pass e.g. --mem=64G on the sbatch line.
 #SBATCH --time=24:00:00
 # In the submit dir: Slurm will not create a missing logs/ and then writes nothing.
 #SBATCH --output=train-%j.out
