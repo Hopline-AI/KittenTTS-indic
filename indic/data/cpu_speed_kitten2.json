@@ -1,0 +1,26 @@
+{
+  "machine": {
+    "cpu": "x86_64",
+    "threads": 20,
+    "flags": [
+      "avx2",
+      "avx_vnni"
+    ],
+    "fp32_gflops": 1120
+  },
+  "rows": [
+    {
+      "model": "kitten2",
+      "repo": "KittenML/kitten-tts-2",
+      "load_s": 7.24,
+      "total_s": 13.513085933867842,
+      "ttfa_s": 13.512997693847865,
+      "audio_s": 5.54,
+      "rtf": 2.439185186618744,
+      "realtime_x": 0.4099729719112568,
+      "repeats": 1,
+      "params_m": 1735,
+      "note": "AR ternary, cloning"
+    }
+  ]
+}

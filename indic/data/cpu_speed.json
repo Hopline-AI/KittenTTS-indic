@@ -1,0 +1,52 @@
+{
+  "machine": {
+    "cpu": "x86_64",
+    "threads": 20,
+    "flags": [
+      "avx2",
+      "avx_vnni"
+    ],
+    "fp32_gflops": 436
+  },
+  "rows": [
+    {
+      "model": "nano",
+      "repo": "KittenML/kitten-tts-nano-0.8-fp32",
+      "load_s": 0.9,
+      "total_s": 0.547361948993057,
+      "ttfa_s": 0.5472910790704191,
+      "audio_s": 9.066666666666666,
+      "rtf": 0.06037080319776364,
+      "realtime_x": 16.56429841962155,
+      "repeats": 3,
+      "params_m": 15,
+      "note": "NAR, no cloning"
+    },
+    {
+      "model": "micro",
+      "repo": "KittenML/kitten-tts-micro-0.8",
+      "load_s": 1.14,
+      "total_s": 0.5770528237335384,
+      "ttfa_s": 0.5769753679633141,
+      "audio_s": 9.316666666666666,
+      "rtf": 0.06193769127730287,
+      "realtime_x": 16.14525790964461,
+      "repeats": 3,
+      "params_m": 40,
+      "note": "NAR, no cloning"
+    },
+    {
+      "model": "mini",
+      "repo": "KittenML/kitten-tts-mini-0.8",
+      "load_s": 1.1,
+      "total_s": 0.6326689878478646,
+      "ttfa_s": 0.6325989249162376,
+      "audio_s": 8.541666666666666,
+      "rtf": 0.07406856443096953,
+      "realtime_x": 13.501004207148915,
+      "repeats": 3,
+      "params_m": 80,
+      "note": "NAR, no cloning"
+    }
+  ]
+}

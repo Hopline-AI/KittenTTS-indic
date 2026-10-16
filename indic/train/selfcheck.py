@@ -973,9 +973,28 @@ def check_shard_reader(ctx):
     write_shard(tmp / "part-1.parquet", rows[half:], tokenizer="selfcheck")
     detail["rows_written"] = len(rows)
 
-    dataset = data.ShardDataset(tmp, token_map, tokenizer="selfcheck", seed=7)
+    # language_temperature=1.0 so the epoch is the natural distribution: the
+    # default (0.0, uniform) resamples, and then len(dataset) is a property of
+    # the balancing policy rather than of the reader this check is testing.
+    dataset = data.ShardDataset(tmp, token_map, tokenizer="selfcheck", seed=7,
+                                language_temperature=1.0)
     detail["rows_read"] = len(dataset)
     read_all = len(dataset) == len(rows)
+
+    # The repeat cap is what makes flat sampling safe, so it has to be shown to
+    # bind. hi has 24 rows against ta's 8; uniform sampling would want 13.3 of
+    # each, which is under ta's 8 x 4 ceiling -- so force the cap with a ceiling
+    # of 1 and check it is reported rather than silently applied.
+    capped = data.ShardDataset(tmp, token_map, tokenizer="selfcheck", seed=7,
+                               language_temperature=0.0, max_epochs_per_language=1)
+    report = capped.describe()
+    no_row_repeats = all(
+        count <= sum(1 for r in capped._keep if capped.language[r] == lang)
+        for lang, count in report["sampled_by_language"].items())
+    detail["uniform_sampled"] = report["sampled_by_language"]
+    detail["capped_languages"] = report["capped_languages"]
+    detail["cap_prevents_repeats"] = no_row_repeats
+    detail["cap_reported"] = bool(report["capped_languages"])
 
     # The mask, derived independently from the token stream, must agree on every
     # example -- the same property check_loss_mask proves for the synthetic set.
@@ -1024,7 +1043,8 @@ def check_shard_reader(ctx):
     detail["refuses_tokenizer_mismatch"] = refuses_mismatch
 
     shutil.rmtree(tmp, ignore_errors=True)
-    passed = (read_all and disagreements == 0 and starts_with_start and unit_norm
+    passed = (read_all and no_row_repeats and detail["cap_reported"]
+              and disagreements == 0 and starts_with_start and unit_norm
               and detail["same_epoch_identical"] and detail["new_epoch_repairs"]
               and detail["epoch_restores"] and start_aligned
               and not supervised_on_pad and refuses_mismatch)

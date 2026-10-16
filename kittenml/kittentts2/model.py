@@ -35,6 +35,17 @@ TOKENS_PER_SECOND = 25
 # Measured delivery rate for this checkpoint. Used to size a per-chunk token budget
 # from the chunk's length, which caps a runaway without truncating honest speech.
 CHARS_PER_SECOND = 20.0
+# Seconds of audio per chunk, which is what actually sets time to first audio.
+# 9 s rather than the 19 s that 380 English characters produced: measured on
+# this checkpoint, cutting the chunk to ~9 s took time to first audio from
+# 9.20 s to 4.99 s for 1% more total wall clock, with the generated-to-expected
+# duration ratio unchanged (1.41 vs 1.38) -- so the model is no less stable on
+# the shorter chunk. Going further to ~4.8 s reaches 2.31 s at 3% more total,
+# which is the setting to pick for an interactive use case.
+CHUNK_SECONDS = 9.0
+# Undersized chunks are the unstable ones, so a floor scaled to the budget
+# rather than a constant that could exceed it.
+CHUNK_MIN_FRACTION = 0.34
 CHUNK_BUDGET_SLACK = 1.8
 MIN_CHUNK_BUDGET = 200
 
@@ -142,7 +153,9 @@ class KittenTTS2:
         self.emotion_control = generation.get("emotion_control")
         self.repetition_window = generation.get("repetition_window")
         self.use_reference_prompt = generation.get("use_reference_prompt", True)
-        self.chunk_chars = generation.get("chunk_chars", text_utils.CHUNK_CHARS)
+        # None means "size it from CHUNK_SECONDS for this text's script"; a
+        # repo config may still pin a character budget explicitly.
+        self.chunk_chars = generation.get("chunk_chars")
         self.chunk_min_chars = generation.get("chunk_min_chars", text_utils.CHUNK_MIN_CHARS)
 
         self.weights = weights or config.get("default_weights", "packed")
@@ -366,6 +379,11 @@ class KittenTTS2:
                                  f"Valid options: {sorted(ADVANCED_OPTIONS)}")
             if value is not None:
                 resolved[key] = value
+        # A caller who names chunk_chars means it; the repository's own value is
+        # only a ceiling (see _synthesize). Recorded here because by the time
+        # the budget is computed, a configured value and a requested one look
+        # identical.
+        resolved["_chunk_chars_explicit"] = (advanced or {}).get("chunk_chars") is not None
         # Fall back to the repository's configuration where nothing was given.
         if resolved["repetition_window"] is None:
             resolved["repetition_window"] = self.repetition_window
@@ -434,7 +452,15 @@ class KittenTTS2:
         """
         if single_chunk:
             return int(max_new_tokens)
-        expected = len(chunk) / CHARS_PER_SECOND * TOKENS_PER_SECOND * CHUNK_BUDGET_SLACK
+        # The rate is per script, not a constant. `CHARS_PER_SECOND` is
+        # calibrated on English, and Devanagari runs at about 14.5 characters
+        # per second of speech -- so a shared constant hands Indic text 38%
+        # fewer tokens than its speech actually needs, spending most of
+        # CHUNK_BUDGET_SLACK before the guard has done any work.
+        from indic.text.indic_text import chars_per_second
+
+        rate = chars_per_second(chunk)
+        expected = len(chunk) / rate * TOKENS_PER_SECOND * CHUNK_BUDGET_SLACK
         return max(MIN_CHUNK_BUDGET, min(int(max_new_tokens), int(expected)))
 
     def _synthesize(self, reference, target_text, preset, max_new_tokens, normalize,
@@ -442,8 +468,32 @@ class KittenTTS2:
         spoken = text_utils.normalize_text(target_text, normalize=normalize)
         if not spoken.strip():
             raise ValueError("no text to speak")
-        chunks = text_utils.split_for_synthesis(spoken, max_chars=advanced["chunk_chars"],
-                                                min_chars=advanced["chunk_min_chars"])
+        # A character budget means a different amount of *audio* per script, and
+        # latency is set by the audio. Measured: 380 characters is 19 s of
+        # English and 26 s of Hindi, and time to first audio follows the
+        # seconds. Sizing from CHUNK_SECONDS equalises it across languages --
+        # measured 9.20 s to first audio at 380 characters against 2.31 s at 95,
+        # for 3% more total wall clock.
+        seconds_budget = text_utils.chunk_chars_for_seconds(spoken, CHUNK_SECONDS)
+        configured = advanced["chunk_chars"]
+        if configured is None:
+            chunk_chars = seconds_budget
+        elif advanced.get("_chunk_chars_explicit"):
+            chunk_chars = configured
+        else:
+            # The repository pins a *character* budget (380), which the authors
+            # calibrated on English. Two things are wrong with applying it
+            # verbatim here: it is a third more audio in Devanagari than in
+            # Latin, and 380 characters is 19 s of speech before the first
+            # sample is emitted. Taking the smaller of the configured budget
+            # and the seconds-based one keeps the author's ceiling while
+            # equalising latency across scripts.
+            chunk_chars = min(int(configured), seconds_budget)
+        chunk_min = advanced["chunk_min_chars"]
+        if chunk_min is None or chunk_min > chunk_chars:
+            chunk_min = max(40, int(chunk_chars * CHUNK_MIN_FRACTION))
+        chunks = text_utils.split_for_synthesis(spoken, max_chars=chunk_chars,
+                                                min_chars=chunk_min)
         settings = self._resolve_preset(preset, overrides)
         if advanced["seed"] is not None:
             torch.manual_seed(int(advanced["seed"]))

@@ -79,6 +79,43 @@ def indic_digits_to_ascii(text):
     return _INDIC_DIGIT_RE.sub(lambda m: INDIC_DIGIT_TO_ASCII[m.group(0)], str(text or ""))
 
 
+# ── speech rate ───────────────────────────────────────────────────────────────
+# How many characters of written text one second of speech consumes. The model
+# uses this twice: to size a chunk, and to bound how many tokens a chunk may
+# generate before it is treated as a runaway.
+#
+# A single English-calibrated constant is wrong for Indic script, and wrong in
+# the dangerous direction. Measured on this checkpoint, 286 Devanagari
+# characters produced 19.7 s of audio -- 14.5 chars/s, not the 20.0 that
+# `model.py` assumes. Two consequences:
+#
+#   * a 380-character chunk is 19 s of English but 26 s of Hindi, so Indic text
+#     waits a third longer for its first audio;
+#   * the runaway guard computes its token budget from the same constant, so it
+#     allows 38% fewer tokens than Indic speech actually needs. The 1.8x slack
+#     absorbs it today, leaving about 1.3x of real margin instead of 1.8x -- the
+#     guard is closer to clipping honest Indic speech than it looks.
+#
+# MEASURED: Devanagari only, on Hindi. The other Brahmic scripts use the same
+# value as the best available estimate rather than a guess per script; Tamil and
+# Telugu write more characters per syllable, so their true rate is probably
+# lower still and their margin thinner. Measure before relying on it:
+# `indic/bench/efficiency.py` reports the ratio of generated to predicted
+# duration, and a value near 1.0 means the rate here is right.
+LATIN_CHARS_PER_SECOND = 20.0
+INDIC_CHARS_PER_SECOND = 14.5
+
+
+def chars_per_second(text):
+    """Written characters consumed per second of speech, by dominant script."""
+    return INDIC_CHARS_PER_SECOND if has_indic(text) else LATIN_CHARS_PER_SECOND
+
+
+def chunk_chars_for(text, seconds):
+    """A character budget that lands near `seconds` of audio in this script."""
+    return max(40, int(seconds * chars_per_second(text)))
+
+
 # ── script detection ──────────────────────────────────────────────────────────
 _SCRIPT_CACHE = {}
 

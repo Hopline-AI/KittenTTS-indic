@@ -206,8 +206,9 @@ class ShardDataset(torch.utils.data.Dataset):
     def __init__(self, shards, token_map, tokenizer=None, *,
                  reference_probability=0.8, reference_max_tokens=250,
                  max_tokens=None, min_audio_tokens=25, max_audio_tokens=750,
-                 max_cer=0.15, languages=None, language_temperature=1.0,
-                 seed=0, epoch=0, embedding_dtype="float32"):
+                 max_cer=0.15, languages=None, language_temperature=0.0,
+                 max_epochs_per_language=4, seed=0, epoch=0,
+                 embedding_dtype="float32"):
         from indic.train.shard_schema import check_compatible
 
         paths = _resolve_shards(shards)
@@ -225,6 +226,7 @@ class ShardDataset(torch.utils.data.Dataset):
                                   languages)
         self._by_speaker = self._index_speakers()
         self.language_temperature = language_temperature
+        self.max_epochs_per_language = max_epochs_per_language
         self.set_epoch(epoch)
 
     # ── loading ───────────────────────────────────────────────────────────
@@ -299,34 +301,63 @@ class ShardDataset(torch.utils.data.Dataset):
         self._order = self._resample_languages()
 
     def _resample_languages(self):
-        """Temperature sampling across languages.
+        """Temperature sampling across languages, with a hard repeat cap.
 
-        With 175 hours of Hindi against 9 of Tamil, uniform sampling means the
-        model sees Tamil in one batch out of twenty and Tamil is exactly the
-        language this project is trying to fix. Temperature `t` samples language
-        `l` in proportion to `count_l ** t`: 1.0 is the natural distribution and
-        0.0 is uniform across languages. Oversampling repeats rows rather than
-        reweighting the loss, so a repeated row still draws a *different*
-        reference each time it appears.
+        With 175 hours of Hindi against 9 of Tamil, natural sampling shows the
+        model Tamil in one batch out of twenty, and Tamil is exactly the language
+        this project exists to fix. Temperature `t` samples language `l` in
+        proportion to `count_l ** t`: 1.0 is the natural distribution, 0.0 is
+        uniform across languages.
+
+        **The default is 0.0, not the 0.3 that the multilingual-text literature
+        would suggest.** Both controlled sweeps on *speech* go flatter than text
+        practice: with exact uniform sampling over four languages, Tamil WER went
+        139.96 -> 39.19 while English and Mandarin also improved, so the flat
+        setting was not paid for by the head languages.
+
+        **`max_epochs_per_language` is the part that makes flat sampling safe.**
+        Uniform sampling over a 20:1 imbalance means passing over the small
+        language twenty times per pass over the large one, and repeating a small
+        fraction of the data very many times can cost as much as halving the
+        model -- a harm that shows up specifically at large model size and long
+        training, which is us. The cap bounds how often any row may repeat in one
+        epoch; the shortfall is left unfilled rather than redistributed, because
+        redistributing it would push some other language past its own cap.
         """
-        if self.language_temperature >= 1.0:
-            return self._keep.copy()
         buckets = {}
         for row in self._keep:
             buckets.setdefault(self.language[row], []).append(int(row))
-        counts = {k: len(v) for k, v in buckets.items()}
-        weights = {k: n ** self.language_temperature for k, n in counts.items()}
+        counts = {lang: len(rows) for lang, rows in buckets.items()}
+        if self.language_temperature >= 1.0 and not self._capped(counts):
+            return self._keep.copy()
+
+        weights = {lang: n ** self.language_temperature for lang, n in counts.items()}
         total_weight = sum(weights.values())
         target_total = sum(counts.values())
         rng = np.random.default_rng([self.seed, 0x5A17, self.epoch])
-        order = []
+        order, self.capped_languages = [], {}
         for lang, rows in buckets.items():
             want = int(round(target_total * weights[lang] / total_weight))
+            ceiling = len(rows) * self.max_epochs_per_language
+            if want > ceiling:
+                self.capped_languages[lang] = {"wanted": want, "capped_to": ceiling,
+                                               "rows": len(rows)}
+                want = ceiling
             if want <= 0:
                 continue
             order.append(rng.choice(rows, size=want,
                                     replace=want > len(rows)).astype(np.int64))
         return np.concatenate(order) if order else self._keep.copy()
+
+    def _capped(self, counts):
+        """True when any language would exceed its repeat ceiling."""
+        if not counts or not self.max_epochs_per_language:
+            return False
+        target_total = sum(counts.values())
+        weights = {lang: n ** self.language_temperature for lang, n in counts.items()}
+        total_weight = sum(weights.values())
+        return any(target_total * weights[lang] / total_weight
+                   > n * self.max_epochs_per_language for lang, n in counts.items())
 
     # ── access ────────────────────────────────────────────────────────────
     def __len__(self):
@@ -423,6 +454,11 @@ class ShardDataset(torch.utils.data.Dataset):
             "kept_by_language": dict(kept),
             "sampled_by_language": dict(sampled),
             "language_temperature": self.language_temperature,
+            "max_epochs_per_language": self.max_epochs_per_language,
+            # Non-empty means a language wanted more repeats than the cap allows:
+            # the mix is flatter than requested, and that is worth seeing in a
+            # training log rather than discovering from a loss curve.
+            "capped_languages": getattr(self, "capped_languages", {}),
             "epoch": self.epoch,
         }
 

@@ -306,6 +306,18 @@ _SENT_END = re.compile(r'(?<=[.!?\u0964\u0965])["’”\')\]]*\s+')
 _TERMINAL = '.!?,;:\u0964\u0965'
 
 
+def chunk_chars_for_seconds(text, seconds):
+    """A character budget that lands near `seconds` of audio in this script.
+
+    Latency is set by how much *audio* a chunk holds, not by how many
+    characters it has, and the two differ by a third between English and
+    Devanagari. Delegated to the Indic layer, which owns the measured rates.
+    """
+    from indic.text.indic_text import chunk_chars_for
+
+    return chunk_chars_for(text, seconds)
+
+
 def split_for_synthesis(text, max_chars=CHUNK_CHARS, min_chars=CHUNK_MIN_CHARS):
     """Sentence-aware greedy packing.
 

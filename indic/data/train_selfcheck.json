@@ -75,7 +75,7 @@
         "spk_proj_grad_abs_sum": 43.25605392456055,
         "passed": true
       },
-      "seconds": 0.59
+      "seconds": 0.72
     },
     {
       "check": "qat_fixed_point",
@@ -190,7 +190,7 @@
         "exact": true
       },
       "export": {
-        "path": "/tmp/tmpwziwe5fu/lm/model-ternary.safetensors",
+        "path": "/tmp/tmp4lkpcc6k/lm/model-ternary.safetensors",
         "packed_tensors": 14,
         "dense_tensors": 14,
         "tensors": 28,
@@ -198,7 +198,7 @@
         "missing": [],
         "passed": true
       },
-      "seconds": 0.42
+      "seconds": 0.41
     },
     {
       "check": "determinism",
@@ -309,6 +309,25 @@
       "note": "round-tripped through real parquet; mask derived independently, as in loss_masking",
       "rows_written": 40,
       "rows_read": 40,
+      "uniform_sampled": {
+        "hi": 13,
+        "ta": 8,
+        "en": 8
+      },
+      "capped_languages": {
+        "ta": {
+          "wanted": 13,
+          "capped_to": 8,
+          "rows": 8
+        },
+        "en": {
+          "wanted": 13,
+          "capped_to": 8,
+          "rows": 8
+        }
+      },
+      "cap_prevents_repeats": true,
+      "cap_reported": true,
       "mask_disagreements": 0,
       "same_epoch_identical": true,
       "new_epoch_repairs": true,
@@ -316,7 +335,7 @@
       "start_at_index_0": true,
       "supervised_position_on_padding": false,
       "refuses_tokenizer_mismatch": true,
-      "seconds": 0.02
+      "seconds": 0.03
     }
   ]
 }

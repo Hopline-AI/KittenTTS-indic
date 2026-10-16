@@ -1,0 +1,73 @@
+{
+  "model": "KittenML/kitten-tts-2",
+  "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+  "language": "hi",
+  "characters": 286,
+  "rows": [
+    {
+      "chunk_chars": 380,
+      "chunk_seconds": 19.0,
+      "ttfa_s": 9.203656220342964,
+      "ttfa_min": 9.035974093712866,
+      "ttfa_max": 9.371338346973062,
+      "total_s": 9.203665260225534,
+      "chunks": 1.0,
+      "audio_s": 19.74,
+      "rtf": 0.4662444407409086,
+      "duration_ratio": 1.3804195804195802,
+      "repeats": 2
+    },
+    {
+      "chunk_chars": 250,
+      "chunk_seconds": 12.5,
+      "ttfa_s": 9.148307459428906,
+      "ttfa_min": 9.06483624689281,
+      "ttfa_max": 9.231778671965003,
+      "total_s": 9.148314317455515,
+      "chunks": 1.0,
+      "audio_s": 19.74,
+      "rtf": 0.4634404416137546,
+      "duration_ratio": 1.3804195804195802,
+      "repeats": 2
+    },
+    {
+      "chunk_chars": 190,
+      "chunk_seconds": 9.5,
+      "ttfa_s": 4.990653200540692,
+      "ttfa_min": 4.87774394871667,
+      "ttfa_max": 5.103562452364713,
+      "total_s": 9.284688140032813,
+      "chunks": 2.0,
+      "audio_s": 20.16,
+      "rtf": 0.46055000694607207,
+      "duration_ratio": 1.4097902097902097,
+      "repeats": 2
+    },
+    {
+      "chunk_chars": 130,
+      "chunk_seconds": 6.5,
+      "ttfa_s": 5.021980334771797,
+      "ttfa_min": 4.910064994823188,
+      "ttfa_max": 5.1338956747204065,
+      "total_s": 9.330881906440482,
+      "chunks": 2.0,
+      "audio_s": 20.16,
+      "rtf": 0.46284136440676993,
+      "duration_ratio": 1.4097902097902097,
+      "repeats": 2
+    },
+    {
+      "chunk_chars": 95,
+      "chunk_seconds": 4.8,
+      "ttfa_s": 2.308356303954497,
+      "ttfa_min": 2.298988062888384,
+      "ttfa_max": 2.31772454502061,
+      "total_s": 9.484067672863603,
+      "chunks": 4.0,
+      "audio_s": 20.28,
+      "rtf": 0.4676561968867654,
+      "duration_ratio": 1.4181818181818182,
+      "repeats": 2
+    }
+  ]
+}
