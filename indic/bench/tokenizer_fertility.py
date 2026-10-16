@@ -63,9 +63,18 @@ def load_fleurs(code, split="dev"):
 
     from huggingface_hub import hf_hub_download
 
-    path = hf_hub_download(FLEURS_REPO, f"data/{LANGUAGES[code].fleurs}/{split}.tsv",
-                           repo_type="dataset")
     out = {}
+    for part in [p for p in str(split).split("+") if p]:
+        path = hf_hub_download(FLEURS_REPO,
+                               f"data/{LANGUAGES[code].fleurs}/{part}.tsv",
+                               repo_type="dataset")
+        _read_tsv(path, out)
+    return out
+
+
+def _read_tsv(path, out):
+    import csv
+
     with open(path, encoding="utf-8") as handle:
         for row in csv.reader(handle, delimiter="\t"):
             if len(row) >= 3 and row[0] not in out:
@@ -77,7 +86,6 @@ def load_fleurs(code, split="dev"):
                 # Bengali syllable in NFD costs more pieces than in NFC, which
                 # would otherwise be read as the tokenizer handling it badly.
                 out[row[0]] = unicodedata.normalize("NFC", row[2])
-    return out
 
 
 def parallel_corpus(codes, split="dev", limit=None):
