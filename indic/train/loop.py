@@ -538,8 +538,11 @@ def run_steps(model, batches, optimizer, scheduler, args, device, start_step=0,
     for step in range(start_step, args.steps):
         optimizer.zero_grad(set_to_none=True)
         total = 0.0
+        started, tokens, slots = time.perf_counter(), 0, 0
         for micro in range(args.accum):
             batch = next(batches)
+            tokens += int(batch["attention_mask"].sum())
+            slots += batch["attention_mask"].numel()
             # Every micro-batch but the last skips DDP's all-reduce. Without
             # this, accumulating N micro-batches costs N gradient syncs across
             # the whole model to produce one update, which on eight GPUs is most
@@ -557,9 +560,22 @@ def run_steps(model, batches, optimizer, scheduler, args, device, start_step=0,
         optimizer.step()
         scheduler.step()
 
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()  # so step_s is GPU time, not launch time
+        step_s = time.perf_counter() - started
+        world = dist.get_world_size() if dist.is_initialized() else 1
+
         loss_value = total / args.accum
+        # Throughput is what the thesis compares across GPUs: tokens are the
+        # real (unpadded) ones, summed over ranks; pad_frac is compute wasted
+        # on padding. Step 0 includes warm-up, so skip it when averaging.
         record = {"step": step, "loss": loss_value, "grad_norm": grad_norm,
-                  "lr": scheduler.get_last_lr()[0], "time": time.time()}
+                  "lr": scheduler.get_last_lr()[0], "time": time.time(),
+                  "step_s": step_s, "tokens": tokens * world,
+                  "tok_per_s": tokens * world / step_s,
+                  "pad_frac": 1 - tokens / max(slots, 1),
+                  "max_mem_gb": (torch.cuda.max_memory_allocated() / 2**30
+                                 if torch.cuda.is_available() else None)}
         history.append(loss_value)
         if logger is not None and (step % max(args.log_every, 1) == 0
                                    or step == args.steps - 1):
