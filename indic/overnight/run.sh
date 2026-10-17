@@ -90,6 +90,7 @@ if [ "$ARM" = sarvam ] && [ ! -f "$DATA/ckpt-sarvam/lm/model.safetensors" ]; the
   say "Sarvam vocab swap on a $PART node, waits for the queue (log: $DATA/logs/vocab.log)"
   ( eval "$("$PY" -m indic.hpc.stage_cache env --hf-home "$STAGED_HF_HOME")"
     srun -p "$PART" --gres=gpu:1 --cpus-per-task=8 --time=30 --job-name=kindic-vocab \
+      bash -c 'echo "address-space limit: soft $(ulimit -v) hard $(ulimit -Hv)"; ulimit -v unlimited 2>/dev/null; exec "$@"' _ \
       "$PY" -m indic.vocab.build_sarvam_vocab --source "$KITTEN" --tokenizer "$SARVAM" \
       --out "$DATA/ckpt-sarvam" --init mean_rescaled ) > "$DATA/logs/vocab.log" 2>&1 \
     || { tail -25 "$DATA/logs/vocab.log"; echo "vocab swap failed: paste the lines above"; exit 1; }

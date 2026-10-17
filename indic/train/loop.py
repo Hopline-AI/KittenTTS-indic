@@ -137,6 +137,33 @@ def toy_model(token_map, hidden=128, layers=2, dtype=torch.float32, seed=0):
                                             attn_implementation="sdpa")
 
 
+def read_safetensors(path):
+    """`safetensors.torch.load_file` without mmap, one tensor at a time.
+
+    ponytail: eX3 (login node and g003) refuses to mmap the 3.5 GB bf16 file
+    with ENOMEM; plain reads need only the tensors' own memory.
+    """
+    import json
+    import struct
+
+    dtypes = {"BF16": torch.bfloat16, "F16": torch.float16, "F32": torch.float32,
+              "F64": torch.float64, "I64": torch.int64, "I32": torch.int32,
+              "I16": torch.int16, "I8": torch.int8, "U8": torch.uint8, "BOOL": torch.bool}
+    state = {}
+    with open(path, "rb") as f:
+        (n,) = struct.unpack("<Q", f.read(8))
+        header = json.loads(f.read(n))
+        header.pop("__metadata__", None)
+        for name, info in header.items():
+            start, end = info["data_offsets"]
+            f.seek(8 + n + start)
+            buf = bytearray(f.read(end - start))
+            tensor = (torch.frombuffer(buf, dtype=dtypes[info["dtype"]]) if buf else
+                      torch.empty(0, dtype=dtypes[info["dtype"]]))
+            state[name] = tensor.reshape(info["shape"])
+    return state
+
+
 def released_model(checkpoint_dir, dtype=torch.bfloat16, weights=None):
     """Load the released 28-layer checkpoint, weights and speaker head together.
 
@@ -170,8 +197,7 @@ def released_model(checkpoint_dir, dtype=torch.bfloat16, weights=None):
     if weights.name.endswith("-ternary.safetensors"):
         state = load_released_state(weights)
     else:
-        from safetensors.torch import load_file
-        state = load_file(str(weights))
+        state = read_safetensors(weights)
 
     config = AutoConfig.from_pretrained(str(checkpoint_dir))
     with no_init_weights():
