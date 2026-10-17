@@ -189,7 +189,6 @@ checkpoint's 15% sparsity matches neither textbook rule, and the question is ope
 
 ```bash
 .venv/bin/python -m indic.preflight              # run everything, in order
-.venv/bin/python -m indic.overnight --deadline-hours 8   # keep sweeping unattended
 ```
 
 `indic/data/PREFLIGHT_REPORT.md` is the output. A **FAIL is a finding**, not a

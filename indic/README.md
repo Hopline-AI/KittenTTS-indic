@@ -17,15 +17,9 @@ project, not a crash — `codec_roundtrip` failing on Telugu would mean the code
 cannot represent Telugu, which is exactly what we want to learn before training
 rather than after.
 
-To keep it running unattended until it settles:
-
-```bash
-.venv/bin/python -m indic.overnight --deadline-hours 8
-```
-
-It re-sweeps as missing scripts appear, never re-runs a green check, defers GPU
-checks while another process holds the card, and retries a failure once before
-accepting it as the answer.
+The unattended preflight loop (`indic/overnight.py`) was removed: the
+`indic/overnight/` pipeline package shadowed it, so `python -m indic.overnight`
+could no longer reach it. It is in git history (commit 9033619).
 
 ## What each piece answers
 
