@@ -1,4 +1,4 @@
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hopline/banner-dark.png"><img alt="KittenTTS-indic by Hopline" src="assets/hopline/banner-light.png" width="100%"></picture></p>
+<p align="center"><img src="docs/assets/readme-banner.png" alt="KittenTTS-indic by Hopline: an English speech model, taught 22 Indian languages" width="100%"></p>
 
 # KittenTTS-indic
 
@@ -9,7 +9,8 @@ one from Sarvam-1, and we fine-tuned it with LoRA on IndicVoices-R (AI4Bharat), 
 hours capped at 10 hours per language.
 
 **Status:** concluded research experiment, kept for reference. It is not maintained, and we do
-not plan to use the model. The full write-up is in [docs/indic/REPORT.md](docs/indic/REPORT.md).
+not plan to use the model. The full write-up is on the Hopline site:
+[hopline.co/writing/kittentts-indic](https://hopline.co/writing/kittentts-indic).
 
 ## Results
 
@@ -98,4 +99,4 @@ Models and data have their own terms, and they may differ:
 - The `sarvamai/sarvam-1` tokenizer is under Sarvam's non-commercial license.
 - IndicVoices-R is distributed by AI4Bharat under its own terms.
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hopline/footer-dark.png"><img alt="Built by Hopline" src="assets/hopline/footer-light.png" width="100%"></picture></p>
+<div align="center"><a href="https://hopline.co"><img src="docs/assets/hopline-footer.svg" alt="Crafted in the open by Hopline" width="560"></a></div>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>KittenTTS-indic banner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --primary: oklch(0.4200 0.0678 133.87);
+  --primary-deep: oklch(0.3400 0.0637 133.87);
+  --primary-container: oklch(0.9000 0.0450 133.87);
+  --secondary-container: oklch(0.9100 0.0283 133.87);
+  --on-secondary-container: oklch(0.2600 0.0375 133.87);
+  --tertiary: oklch(0.4200 0.0823 181.87);
+  --background: oklch(0.9900 0.0031 133.87);
+  --ink: oklch(0.1900 0.0050 133.87);
+  --ink-soft: oklch(0.3400 0.0164 133.87);
+  --ink-faint: oklch(0.5200 0.0179 133.87);
+  --outline-variant: oklch(0.8400 0.0120 133.87);
+  --hairline: oklch(0.8800 0.0090 133.87);
+  --sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1500px; height: 500px; overflow: hidden; background: var(--background); }
+body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+.canvas { position: relative; width: 1500px; height: 500px; overflow: hidden; background: var(--background); }
+.grid { position: absolute; inset: 0;
+  background-image: radial-gradient(circle, var(--hairline) 1.3px, transparent 1.6px);
+  background-size: 28px 28px; background-position: 14px 14px; opacity: .75; }
+.rule { position: absolute; top: 0; left: 0; right: 0; height: 8px; background: var(--primary); opacity: .72; }
+.motif { position: absolute; right: 60px; top: 126px; width: 520px; height: 300px; }
+.header { position: absolute; top: 72px; left: 96px; right: 96px; display: flex; align-items: center; justify-content: space-between; }
+.brand { display: flex; align-items: center; gap: 16px; }
+.brand svg { width: 58px; height: 58px; color: var(--primary); }
+.word { font-weight: 800; font-size: 32px; letter-spacing: -0.02em; }
+.by { font-weight: 500; font-size: 19px; color: var(--ink-faint); margin-left: 4px; position: relative; top: 2px; }
+.by b { font-weight: 700; color: var(--ink-soft); }
+.pill { font-weight: 600; font-size: 19px; color: var(--primary); background: var(--secondary-container);
+  padding: 11px 22px; border-radius: 999px; opacity: .92; }
+.main { position: absolute; left: 96px; top: 166px; width: 900px; }
+h1 { font-weight: 800; font-size: 64px; line-height: 1.05; letter-spacing: -0.028em; }
+h1 em { font-style: normal; color: var(--primary); }
+p.sub { margin-top: 20px; font-size: 21px; line-height: 1.5; color: var(--ink-soft); max-width: 860px; }
+.footer { position: absolute; left: 96px; bottom: 44px; font-size: 20px; color: var(--ink-faint); display: flex; align-items: center; gap: 12px; }
+.footer b { font-weight: 700; color: var(--ink); }
+.footer .mono { font-family: var(--mono); font-size: 16px; color: var(--ink-soft); }
+.footer .sep { color: var(--outline-variant); }
+</style></head>
+<body><div class="canvas">
+  <div class="grid"></div>
+  <div class="rule"></div>
+
+  <svg class="motif" viewBox="-40 -30 520 300" aria-hidden="true"><line x1="0" y1="238" x2="440" y2="238" stroke="var(--primary)" stroke-width="1.5" opacity=".16"/><line x1="115.9" y1="8.0" x2="396.2" y2="8.0" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="396.2" cy="8.0" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="115.9" cy="8.0" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="150.0" y1="18.4" x2="428.3" y2="18.4" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="428.3" cy="18.4" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="150.0" cy="18.4" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="67.3" y1="28.8" x2="338.4" y2="28.8" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="338.4" cy="28.8" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="67.3" cy="28.8" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="130.1" y1="39.2" x2="401.0" y2="39.2" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="401.0" cy="39.2" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="130.1" cy="39.2" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="49.7" y1="49.6" x2="319.1" y2="49.6" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="319.1" cy="49.6" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="49.7" cy="49.6" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="156.1" y1="60.0" x2="401.4" y2="60.0" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="401.4" cy="60.0" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="156.1" cy="60.0" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="91.8" y1="70.4" x2="327.7" y2="70.4" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="327.7" cy="70.4" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="91.8" cy="70.4" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="102.2" y1="80.8" x2="333.4" y2="80.8" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="333.4" cy="80.8" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="102.2" cy="80.8" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="172.2" y1="91.2" x2="387.2" y2="91.2" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="387.2" cy="91.2" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="172.2" cy="91.2" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="154.8" y1="101.6" x2="348.4" y2="101.6" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="348.4" cy="101.6" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="154.8" cy="101.6" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="141.2" y1="112.0" x2="298.6" y2="112.0" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="298.6" cy="112.0" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="141.2" cy="112.0" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="229.6" y1="122.4" x2="382.4" y2="122.4" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="382.4" cy="122.4" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="229.6" cy="122.4" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="157.8" y1="132.8" x2="283.3" y2="132.8" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="283.3" cy="132.8" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="157.8" cy="132.8" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="240.3" y1="143.2" x2="357.4" y2="143.2" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="357.4" cy="143.2" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="240.3" cy="143.2" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="7.8" y1="153.6" x2="124.5" y2="153.6" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="124.5" cy="153.6" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="7.8" cy="153.6" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="163.2" y1="164.0" x2="266.3" y2="164.0" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="266.3" cy="164.0" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="163.2" cy="164.0" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="182.1" y1="174.4" x2="279.5" y2="174.4" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="279.5" cy="174.4" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="182.1" cy="174.4" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="167.4" y1="184.8" x2="264.6" y2="184.8" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="264.6" cy="184.8" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="167.4" cy="184.8" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="126.1" y1="195.2" x2="218.7" y2="195.2" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="218.7" cy="195.2" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="126.1" cy="195.2" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="176.2" y1="205.6" x2="252.5" y2="205.6" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="252.5" cy="205.6" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="176.2" cy="205.6" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="37.1" y1="216.0" x2="108.1" y2="216.0" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="108.1" cy="216.0" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="37.1" cy="216.0" r="3.6" fill="var(--primary)" opacity=".38"/><line x1="109.2" y1="226.4" x2="157.8" y2="226.4" stroke="var(--primary)" stroke-width="2.2" opacity=".18"/><circle cx="157.8" cy="226.4" r="3.4" fill="none" stroke="var(--primary)" stroke-width="1.6" opacity=".34"/><circle cx="109.2" cy="226.4" r="3.6" fill="var(--primary)" opacity=".38"/><g font-family="JetBrains Mono, monospace" font-size="14" fill="var(--primary)" opacity=".42"><text x="0" y="-8">held-out loss, 22 languages</text><text x="0" y="258">4.0</text><text x="210" y="258" text-anchor="middle">5.0</text><text x="419" y="258" text-anchor="end">6.0</text></g></svg>
+
+  <div class="header">
+    <div class="brand">
+      <svg viewBox="163.026 116.623 179.041 185.094" aria-hidden="true"><path fill="currentColor" d="M280.881104,135.101990 C307.139709,146.241348 324.180054,165.190979 330.803619,192.582138 C342.067566,239.163208 312.538727,283.839325 264.509491,292.490692 C213.286682,301.717285 163.026108,259.473145 169.456589,203.128754 C175.740707,148.066818 228.134415,116.623428 280.881104,135.101990 M235.495209,174.042023 C238.309952,177.200363 241.528473,177.376831 244.828705,175.017990 C247.584610,173.048187 248.943344,169.955139 246.923370,167.185669 C243.658096,162.708862 240.288803,157.788269 235.793137,154.839142 C227.056137,149.107712 214.806091,151.579254 206.933548,159.395065 C199.662247,166.613922 198.340042,178.659088 204.196152,188.482040 C210.078476,198.348999 216.366684,207.974030 222.479782,217.703354 C223.985931,220.100464 225.469971,222.512375 227.021606,224.879837 C230.107040,229.587601 233.555328,230.686676 237.364563,228.231613 C241.144516,225.795441 241.512115,222.364258 238.514084,217.396729 C237.911453,216.398224 237.277420,215.418640 236.656128,214.431427 C229.821976,203.572083 222.933990,192.746033 216.184967,181.834045 C214.100464,178.463776 213.009918,174.803146 215.388306,171.019760 C217.710526,167.325684 221.090408,165.427139 225.444122,165.661499 C230.455170,165.931244 232.751114,169.754944 235.495209,174.042023 M283.140961,211.331467 C280.116943,206.550858 277.174469,201.716003 274.041779,197.007706 C271.749359,193.562302 268.566620,192.843719 264.935760,194.873032 C261.417725,196.839340 260.551788,200.396164 262.558228,204.322830 C263.086578,205.356857 263.773651,206.310165 264.393311,207.297119 C271.741364,219.000275 279.178497,230.648819 286.397736,242.430908 C289.469879,247.444809 288.329895,252.022522 283.677643,255.579514 C279.145905,259.044434 274.345154,258.710571 270.286804,254.416428 C268.704590,252.742294 267.887085,249.944901 266.040253,249.022278 C263.704315,247.855301 260.413391,247.206863 258.008148,247.923950 C254.993439,248.822708 253.326538,252.012146 254.764465,255.251129 C258.196808,262.982513 263.234802,269.392853 272.160767,270.858246 C282.721588,272.592072 291.849091,269.493042 297.821716,260.327606 C303.596588,251.465622 302.416870,242.267624 297.065247,233.504059 C292.642975,226.262375 288.060150,219.118744 283.140961,211.331467 M287.767365,205.566452 C292.775116,210.308853 296.713104,206.389542 300.536957,203.742340 C309.701599,197.397766 312.912292,185.999176 308.654358,175.937622 C304.026489,165.001831 293.806091,158.990677 282.596649,161.904678 C276.817017,163.407150 271.405273,166.756592 266.178955,169.863052 C256.321625,175.722122 246.676086,181.942932 237.029999,188.149338 C232.883926,190.816925 232.046967,194.339600 234.292953,197.895218 C236.554291,201.475128 240.008041,202.132721 244.276733,199.743454 C245.581558,199.013123 246.819916,198.163925 248.087158,197.366669 C258.928680,190.546204 269.706146,183.620850 280.633575,176.940903 C287.937744,172.475861 295.388245,175.073441 296.767242,182.401352 C297.821747,188.005112 294.547180,191.391159 290.272461,194.215271 C285.203400,197.564163 284.702789,199.537277 287.767365,205.566452 M191.373871,238.356781 C193.667252,259.369019 211.385574,267.971436 229.404037,256.760010 C240.983261,249.555191 252.510452,242.265884 264.014282,234.941162 C268.708771,231.952118 269.701691,228.378891 267.148071,224.585022 C264.710052,220.962891 261.356750,220.507767 256.701111,223.384583 C249.482452,227.845123 242.333939,232.419037 235.147491,236.931808 C229.934082,240.205582 224.797531,243.615662 219.459335,246.672684 C214.807419,249.336700 209.849564,248.322906 206.877274,244.556290 C203.697189,240.526321 203.935059,235.452637 207.751419,231.465485 C209.220078,229.931107 211.144669,228.833969 212.857483,227.532288 C216.134201,225.042038 217.034698,221.951035 214.792831,218.388824 C212.597534,214.900604 209.448975,213.993378 205.760864,215.969971 C197.151260,220.584167 191.364258,227.146301 191.373871,238.356781 z"/></svg>
+      <span class="word">KittenTTS-indic</span>
+      <span class="by">by <b>Hopline</b></span>
+    </div>
+    <div class="pill">Research · Concluded</div>
+  </div>
+
+  <div class="main">
+    <h1>An English speech model,<br>taught <em>22</em> Indian languages.</h1>
+    <p class="sub">KittenTTS 2 with the Sarvam-1 tokenizer and LoRA on IndicVoices-R.<br>Lower loss in 22 of 22 languages; intelligible by ear in about 12.</p>
+  </div>
+
+  <div class="footer">
+    <b>hopline.co</b><span class="sep">·</span><span class="mono">github.com/Hopline-AI/KittenTTS-indic</span>
+  </div>
+</div></body></html>
