@@ -1,5 +1,7 @@
 # The plan: a TTS that runs on essentially any machine
 
+> **Status:** this experiment is concluded (17 October 2026) and kept for reference only; the code is not maintained. See [the final report](REPORT.md) for what was run and what we found.
+
 Supersedes the architecture assumptions in
 [2026-10-16-findings-and-decisions.md](2026-10-16-findings-and-decisions.md),
 which were written before CPU-everywhere became a requirement. The measurements

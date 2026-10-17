@@ -1,5 +1,7 @@
 # Quickstart: from nothing to a trained model
 
+> **Status:** this experiment is concluded (17 October 2026) and kept for reference only; the code is not maintained. See [the final report](../docs/indic/REPORT.md) for what was run and what we found.
+
 Every command below is runnable today. Where something is blocked, it says so
 and says what unblocks it.
 

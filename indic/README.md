@@ -1,5 +1,7 @@
 # `indic/` — the Indic adaptation harness
 
+> **Status:** this experiment is concluded (17 October 2026) and kept for reference only; the code is not maintained. See [the final report](../docs/indic/REPORT.md) for what was run and what we found.
+
 Everything needed to decide whether KittenTTS 2 can be adapted to Indian
 languages, and to prove the training pipeline is correct before any allocation is
 spent on it. Nothing here modifies the shipped library except the danda fixes in
