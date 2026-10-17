@@ -10,8 +10,8 @@
 # same code path with a one-member process group -- so the same file covers the
 # pilot (one card, Hindi only) and the main run.
 #
-#   sbatch --gpus-per-node=4 indic/hpc/slurm/train.sbatch
-#   sbatch --gpus-per-node=1 indic/hpc/slurm/train.sbatch     # pilot
+#   sbatch -p hgx2q --gres=gpu:4 indic/hpc/slurm/train.sbatch
+#   sbatch -p hgx2q --gres=gpu:1 indic/hpc/slurm/train.sbatch     # pilot
 #
 # Multi-NODE is deliberately out of scope. It needs a rendezvous endpoint, the
 # right interconnect interface in NCCL_SOCKET_IFNAME, and a per-site answer about
@@ -34,7 +34,7 @@
 # One task that owns every GPU on the node; torchrun forks the ranks itself.
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=1
+#SBATCH --gres=gpu:1
 #
 # Data loading is CPU-bound (audio decode, S3 token lookup), so give the node's
 # cores to the one task and let the per-rank dataloader workers divide them.
@@ -43,22 +43,22 @@
 # Host RAM. A full fine-tune with AdamW is about 16 bytes/param, roughly 27 GB,
 # but that lives in VRAM; this is for the dataset shards, the dataloader workers
 # and the CPU-side unpack of the ternary checkpoint.
-#SBATCH --mem=128G
+# No --mem: eX3 nodes report RealMemory=1, so any --mem request is rejected.
+# On a cluster that tracks memory, pass e.g. --mem=64G on the sbatch line.
 #SBATCH --time=24:00:00
-#SBATCH --output=logs/train-%j.out
-#SBATCH --error=logs/train-%j.err
+# In the submit dir: Slurm will not create a missing logs/ and then writes nothing.
+#SBATCH --output=train-%j.out
+#SBATCH --error=train-%j.err
 #
-# Checkpoint before preemption. Slurm sends USR1 to the batch script this many
-# seconds before the job is killed; the trap below forwards it to the training
-# process, which should save and exit. Remove both if your training loop does not
-# handle USR1 yet -- a signal nothing catches just kills the job sooner.
-#SBATCH --signal=B:USR1@180
+# Preemption: the loop writes $RUN_DIR/latest.pt every SAVE_EVERY steps and a
+# requeued job resumes from it, so at most SAVE_EVERY steps are lost.
 #SBATCH --requeue
 
 set -euo pipefail
 
 : "${STAGED_HF_HOME:?set STAGED_HF_HOME to the directory staged by indic.hpc.stage_cache}"
-: "${RUN_DIR:=runs/$(date +%Y%m%d)-${SLURM_JOB_ID:-local}}"
+: "${RUN_DIR:=runs/${SLURM_JOB_ID:-local}}"   # stable across requeues
+: "${SAVE_EVERY:=500}"
 : "${REPO_DIR:=$(pwd)}"
 : "${PYTHON:=python}"
 : "${ACTIVATE:=}"
@@ -77,7 +77,7 @@ export TORCHINDUCTOR_CACHE_DIR="$TMPDIR/inductor"
 # How many ranks. SLURM_GPUS_ON_NODE is what the scheduler actually gave this job,
 # which is the only trustworthy count: nvidia-smi reports every card on the node,
 # including the ones belonging to someone else's job.
-NPROC="${SLURM_GPUS_ON_NODE:-1}"
+NPROC="${SLURM_GPUS_ON_NODE:-$(awk -F, '{print NF}' <<<"${CUDA_VISIBLE_DEVICES:-0}")}"
 
 # Threads per rank, so N ranks do not each spawn one thread per core on the node.
 export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-8} / NPROC ))
@@ -102,10 +102,9 @@ echo "== preflight on $(hostname), $NPROC rank(s) =="
 "$PYTHON" -m indic.hpc.env_lock capture --out "$RUN_DIR/env.json" \
   --label "${SLURM_JOB_NAME:-train}"
 
-# The training entry point does not exist yet -- docs/indic/training.md is the
-# plan for it. Point TRAIN_MODULE at it once it does; the flags below are the
-# shape this template assumes.
-: "${TRAIN_MODULE:=indic.train.finetune}"
+: "${TRAIN_MODULE:=indic.train.loop}"
+RESUME=()
+[ -f "$RUN_DIR/latest.pt" ] && RESUME=(--resume "$RUN_DIR/latest.pt")
 
 # --standalone sets up a single-node rendezvous on localhost, which is what makes
 # this work unchanged from one GPU to eight.
@@ -114,12 +113,6 @@ torchrun \
   --nnodes=1 \
   --nproc_per_node="$NPROC" \
   -m "$TRAIN_MODULE" \
-  --run-dir "$RUN_DIR" \
-  "$@" &
-
-TRAIN_PID=$!
-# Forward the pre-emption signal to the training process rather than letting it
-# kill this script and orphan the ranks.
-trap 'echo "USR1: asking rank 0 to checkpoint"; kill -USR1 "$TRAIN_PID"' USR1
-wait "$TRAIN_PID"
+  --device cuda --out "$RUN_DIR" --save-every "$SAVE_EVERY" \
+  "${RESUME[@]}" "$@"
 echo "== done: $RUN_DIR =="

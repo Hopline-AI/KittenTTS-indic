@@ -1,5 +1,7 @@
 # `indic/` — the Indic adaptation harness
 
+> **Status:** this experiment is concluded (17 October 2026) and kept for reference only; the code is not maintained. See [the final report](../docs/indic/REPORT.md) for what was run and what we found.
+
 Everything needed to decide whether KittenTTS 2 can be adapted to Indian
 languages, and to prove the training pipeline is correct before any allocation is
 spent on it. Nothing here modifies the shipped library except the danda fixes in
@@ -17,15 +19,9 @@ project, not a crash — `codec_roundtrip` failing on Telugu would mean the code
 cannot represent Telugu, which is exactly what we want to learn before training
 rather than after.
 
-To keep it running unattended until it settles:
-
-```bash
-.venv/bin/python -m indic.overnight --deadline-hours 8
-```
-
-It re-sweeps as missing scripts appear, never re-runs a green check, defers GPU
-checks while another process holds the card, and retries a failure once before
-accepting it as the answer.
+The unattended preflight loop (`indic/overnight.py`) was removed: the
+`indic/overnight/` pipeline package shadowed it, so `python -m indic.overnight`
+could no longer reach it. It is in git history (commit 9033619).
 
 ## What each piece answers
 

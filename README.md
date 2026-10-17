@@ -1,293 +1,101 @@
-# Kitten TTS
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hopline/banner-dark.png"><img alt="KittenTTS-indic by Hopline" src="assets/hopline/banner-light.png" width="100%"></picture></p>
 
-<p align="center">
-  <img width="607" alt="Kitten TTS" src="https://raw.githubusercontent.com/KittenML/KittenTTS/main/assets/banner.png" />
-</p>
+# KittenTTS-indic
 
-<p align="center">
-  <a href="https://huggingface.co/spaces/KittenML/KittenTTS-Demo"><img src="https://img.shields.io/badge/Demo-Hugging%20Face%20Spaces-orange" alt="Hugging Face Demo"></a>
-  <a href="https://discord.com/invite/VJ86W4SURW"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://kittenml.com"><img src="https://img.shields.io/badge/Website-kittenml.com-blue" alt="Website"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-green.svg" alt="License"></a>
-</p>
+This is a fork of [KittenTTS](https://github.com/KittenML/KittenTTS) by KittenML. We used it to
+test whether KittenTTS 2, a 1.7B-parameter speech language model that mostly speaks English,
+could learn 22 Indian languages. We made two changes: we swapped its text tokenizer for the
+one from Sarvam-1, and we fine-tuned it with LoRA on IndicVoices-R (AI4Bharat), about 210
+hours capped at 10 hours per language.
 
-> ## **New:** Free Kitten TTS API available at  [https://platform.kittenml.com](https://platform.kittenml.com/)
+**Status:** concluded research experiment, kept for reference. It is not maintained, and we do
+not plan to use the model. The full write-up is in [docs/indic/REPORT.md](docs/indic/REPORT.md).
 
-Kitten TTS is an open-source text-to-speech library. Its flagship model, **KittenTTS 2**, is a
-1.7B-parameter 1-bit speech language model with in-context voice cloning and expression control: give it
-five seconds of anyone's voice and it speaks your text in that voice. It runs realtime on a CPU!
+## Results
 
-The library also ships the original [**lightweight legacy models**](docs/onnx-models.md),
-15M-80M parameters, which run on CPU without a GPU. Both families load through the same
-`KittenTTS(...)` constructor.
+We trained for 5 hours on one NVIDIA H200 on the eX3 research cluster on 17 October 2026, then
+compared the fine-tuned model with the original KittenTTS 2 on held-out IndicVoices-R clips.
 
-**Commercial support is available.** For integration assistance, custom voices, or enterprise licensing, [contact us](https://docs.google.com/forms/d/e/1FAIpQLSc49erSr7jmh3H2yeqH4oZyRRuXm0ROuQdOgWguTzx6SMdUnQ/viewform?usp=preview).
-
-## Table of Contents
-
-- [Features](#features)
-- [Available Models](#available-models)
-- [Demo](#demo)
-- [Quick Start](#quick-start)
-- [Voice cloning](#voice-cloning)
-- [Expression controls](#expression-controls)
-- [Running on CPU](#running-on-cpu)
-- [Running with vLLM](#running-with-vllm)
-- [Long text and streaming](#long-text-and-streaming)
-- [Documentation](#documentation)
-- [System Requirements](#system-requirements)
-- [Commercial Support](#commercial-support)
-- [Community and Support](#community-and-support)
-- [License](#license)
-
-## Features
-
-- **Voice cloning** -- Clone any speaker from 5-30 seconds of audio, no fine-tuning
-- **47 built-in voices** -- Including the eight from KittenTTS 0.8 and nine non-English
-- **Multilingual** -- 20 languages: English, Arabic, Chinese, French, German, Hindi, Italian, Portuguese, Russian, Spanish, Japanese, Korean, Turkish, Dutch, Swedish, Danish, Finnish, Swahili, Greek, Hebrew
-- **Expression control** -- `[emotion]` tags, inline `<event>` tags, and `(((emphasis)))` spans
-- **Decoding presets** -- Trade stability against expressiveness per request
-- **Long-form text** -- Sentence-aware chunking with seamless joins
-- **Text preprocessing** -- Numbers, currencies, dates, units and abbreviations expanded automatically
-- **24 kHz output** -- High-quality audio at a standard sample rate
-- **Runs without a GPU**
-- **Optimized C++ inference for CPU** -- Our fork of [llama.cpp](https://github.com/KittenML/kitten-tts-2-cpp)
-## Available Models
-
-**KittenTTS 2** -- speech language model:
-
-| Model | Parameters | Size | Voices | Download |
-|---|---|---|---|---|
-| kitten-tts-2 | 1.7B | 506 MiB | 47 + cloning | [KittenML/kitten-tts-2](https://huggingface.co/KittenML/kitten-tts-2) |
-
-**Lightweight ONNX** -- runs on CPU, no GPU required:
-
-| Model | Parameters | Size | Download |
-|---|---|---|---|
-| kitten-tts-mini | 80M | 80 MB | [KittenML/kitten-tts-mini-0.8](https://huggingface.co/KittenML/kitten-tts-mini-0.8) |
-| kitten-tts-micro | 40M | 41 MB | [KittenML/kitten-tts-micro-0.8](https://huggingface.co/KittenML/kitten-tts-micro-0.8) |
-| kitten-tts-nano | 15M | 56 MB | [KittenML/kitten-tts-nano-0.8](https://huggingface.co/KittenML/kitten-tts-nano-0.8-fp32) |
-| kitten-tts-nano (int8) | 15M | 25 MB | [KittenML/kitten-tts-nano-0.8-int8](https://huggingface.co/KittenML/kitten-tts-nano-0.8-int8) |
-
-
-## Demo
-
-
-https://github.com/user-attachments/assets/c42c236b-7b7d-41d6-944b-7527a5f30626
-
-
-
-
-
-
-
-
-### Try it online
-
-Try Kitten TTS directly in your browser on [KittenML Platform](https://platform.kittenml.com).
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.9 or later
-- A CUDA GPU with roughly 8 GB free, or a CPU with about 6 GB of RAM
-- About 1 GB of disk space for the model, or 506 MiB with the smaller weights
-
-### Installation
-
-```bash
-pip install kittenml
-```
-
-That is the whole install. KittenTTS 2 is the default model, voice cloning is included, and no
-Hugging Face login is needed -- every weight the model uses ships in its own repository. It also
-pulls the small ONNX runtime, so the [lightweight models](docs/onnx-models.md) work from the
-same install.
-
-### Basic usage
-
-```python
-from kittenml import KittenTTS
-import soundfile as sf
-
-m = KittenTTS("KittenML/kitten-tts-2")
-
-audio = m.generate("One day, a little girl named Lily found a needle in her room.",
-                   voice="Bruno")
-sf.write("output.wav", audio, m.sample_rate)
-```
-
-`m.available_voices` lists all 47 built-in voices, described in
-[voices and expression](docs/voices-and-expression.md). Bella, Jasper, Luna, Bruno, Rosie, Hugo,
-Kiki and Leo are the same speakers as in KittenTTS 0.8, so code written against the ONNX models
-keeps working.
-
-The weights come in two sizes. The default is 947 MiB and lossless; `weights="emb4"` is 506 MiB
-because it quantises the token embedding, which costs a little quality. Only the one you ask for
-is downloaded.
-
-```python
-m = KittenTTS("KittenML/kitten-tts-2", weights="emb4")   # half the download
-```
-
-```python
-# Trade stability against expressiveness
-audio = m.generate("Hello, world.", voice="Luna", preset="expressive")
-
-# Save directly to a file
-m.generate_to_file("Hello, world.", "output.wav", voice="Bruno")
-```
-
-## Voice cloning
-
-Pass `reference=` instead of `voice=` — same method, the recording just replaces the built-in
-speaker. Give it 5-30 seconds of a single speaker. The transcript is part of the prompt, but you
-do not have to type it; Whisper fills it in when omitted.
-
-```python
-audio = m.generate("This is my own voice, cloned.", reference="my_voice.wav")
-
-# Supplying the transcript skips the Whisper pass
-audio = m.generate("This is my own voice.", reference="my_voice.wav",
-                   reference_text="what is actually said in the clip")
-```
-
-The reference feeds the model by two independent routes -- a speaker embedding through the
-model's projection head, and the clip itself as codec tokens in the prompt -- so identity
-survives even when one route is weak.
-
-Measured on the built-in voices: a generated clip scores 0.49-0.72 speaker similarity against its
-own reference and 0.01-0.18 against the other 37, and cloning an unseen recording scores 0.81
-against that recording.
-
-## Expression controls
-
-> **Beta.** Emotion control steers delivery rather than guaranteeing it, and the effect varies
-> by voice and by sentence.
-
-```python
-audio = m.generate(
-    "[joyful] We actually won the grant <laugh> I can (((hardly))) believe it!",
-    voice="Kiki",
-    preset="expressive",
-)
-```
-
-A leading `[emotion]` tag, inline `<event>` tags and `(((emphasis)))` spans reach the model as
-markup rather than being spoken, and automatically enable its expression conditioning. Ten
-emotions and ten vocal events are recognised -- see
-[voices and expression](docs/voices-and-expression.md) for the full lists and what is not
-covered.
-
-## Running on CPU
-
-KittenTTS 2 runs on CPU out of the box — `device` is auto-detected — but the fastest way is
-[kitten-tts-2-cpp](https://github.com/KittenML/kitten-tts-2-cpp), our llama.cpp fork. It reads
-the GGUF weights in the model repository's `cpp/` directory.
-
-## Running with vLLM
-
-For GPU inference with vLLM on Linux and an NVIDIA CUDA GPU, install the optional backend:
-
-```bash
-pip install "kittenml[vllm]"
-```
-
-Select `backend="vllm"`:
-
-```python
-from kittenml import KittenTTS
-
-def main():
-    m = KittenTTS("KittenML/kitten-tts-2", backend="vllm")
-    m.generate_to_file("Hello there.", "output.wav", voice="Bruno")
-    print("Saved output.wav")
-
-if __name__ == "__main__":
-    main()
-```
-
-Keep the main guard when running a script: vLLM starts a worker process. The same
-voices, decoders, weight choices and generation arguments apply. See the
-[vLLM guide](docs/vllm.md) for memory settings and benchmarks.
-
-
-## Long text and streaming
-
-Long input is split on sentence boundaries and synthesized chunk by chunk, then joined with
-silence trimming and short edge fades so the seams are inaudible. This is automatic: the model is
-reliable on short inputs but truncates or drifts into repetition when asked for a whole script in
-one pass.
-
-To start playing before the whole thing is ready, stream it:
-
-```python
-for chunk in m.generate_stream(long_text, voice="Luna"):
-    play(chunk)          # each chunk is a numpy array at m.sample_rate
-```
-
-It takes the same arguments as `generate`, so `reference=` streams a cloned voice too.
-
-Streaming is **chunk-level, not token-level**: a chunk is generated and vocoded in full before it
-is yielded, so the first chunk still costs its own generation time. On an A100, a 936-character
-passage yielded its first 21 s of audio after 17 s and finished 54 s of audio in 42 s of wall
-clock -- so playback keeps ahead of generation, but there is a real initial delay.
-
-Two consequences worth knowing:
-
-- **Short text does not stream.** Input that fits in one chunk (under roughly 380 characters,
-  and short trailing pieces get merged into their neighbour) yields exactly one chunk, so
-  `generate_stream` behaves like `generate`.
-- **Chunks are yielded raw.** `generate` post-processes the seams -- trimming each segment's edge
-  silence, adding short fades and one consistent pause -- which a streaming caller cannot do
-  without waiting for the next chunk. Concatenating streamed chunks directly gives slightly
-  rougher joins than `generate` on the same text.
-
-## Documentation
-
-| | |
+| Check | Result |
 |---|---|
-| [API reference](docs/api.md) | Every argument to `generate`, streaming, and the advanced knobs |
-| [Voices and expression](docs/voices-and-expression.md) | The 47 voices, emotion and vocal-event tags, the ten languages |
-| [Decoders](docs/decoders.md) | How audio is decoded, and the smaller quantised decoders |
-| [Text normalization](docs/text-normalization.md) | How written text becomes spoken text |
-| [Architecture](docs/architecture.md) | What the model is, package layout, vendored components |
-| [Lightweight ONNX models](docs/onnx-models.md) | The CPU models, 15M-80M parameters, and their API |
+| Held-out audio-token loss (teacher-forced) | Lower than the original on 22 of 22 languages; mean drop 0.81, about 2.3x lower perplexity |
+| Listening plus a Whisper transcript, 2 sentences per language | Intelligible in about 12 of 22 languages (6 newly, 6 the original already handled); partial in 4; failing in 6 |
+| Speed on CPU (20 threads) | Real-time factor 2.439, with 13.5 s to first audio, so slower than real time |
 
-## System Requirements
+Lower loss everywhere did not mean intelligible speech everywhere. The CPU speed is why we
+stopped. Hopline needs speech on laptops and phones, and a 1.7B autoregressive model runs slower
+than real time there. Merging LoRA also turns the weights into bf16 (about 3 GB), so the
+fine-tuned model loses the 506 MiB ternary packing. The report has per-language numbers,
+caveats and what we would do differently.
 
-**KittenTTS 2**
+## Repository layout
 
-- **Operating system:** Linux, Windows or Mac
-- **Python:** 3.9 or later
+| Path | What it is |
+|---|---|
+| `kittenml/` | The upstream KittenTTS library, with small Indic fixes: `kittentts2/text.py` treats the danda as a sentence end, `kittentts2/model.py` sizes chunks by seconds of audio per script and warns when bf16 is emulated, and `kittentts2/speaker.py` detects the reference clip's language |
+| `indic/overnight/` | The pipeline we ran: IndicVoices-R fetch, shard preparation, Slurm stages and the baseline vs fine-tuned evaluation (`run.sh` is the entry point) |
+| `indic/vocab/` | Sarvam-1 vocabulary swap on the checkpoint, and a check that the rebuilt checkpoint is correct |
+| `indic/train/` | Training loop (LoRA, embedding and full modes), shard reader and a CPU self-check |
+| `indic/bench/` | Benchmarks: tokenizer fertility, codec round trip, sequence format, GPU fit, CPU speed |
+| `indic/eval/` | Evaluation harness: test sets, ASR, error rates and speaker similarity |
+| `indic/hpc/` | Hardware detection, offline model staging and Slurm templates |
+| `indic/preflight.py` | Runs the pre-training checks in order and writes `indic/data/PREFLIGHT_REPORT.md` |
+| `indic/data/` | Measurement JSON files that the docs cite |
+| `docs/indic/` | Plan, runbook, findings and research notes for the Indic work |
+| `docs/` (other files), `example*.py`, `tests/` | Upstream KittenTTS documentation, examples and tests |
 
+## Reproducing the run
 
-A virtual environment (conda, venv, or similar) is recommended to avoid dependency conflicts.
+You need a Slurm cluster with an NVIDIA GPU, a Hugging Face token that has accepted the
+`ai4bharat/indicvoices_r` terms, and the models staged for offline compute nodes. The entry
+point is `indic/overnight/run.sh`. The header of that script lists its settings, and
+[indic/QUICKSTART.md](indic/QUICKSTART.md) and [docs/indic/RUNBOOK.md](docs/indic/RUNBOOK.md)
+cover setup.
 
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r indic/requirements-hpc.txt
 
-## Commercial Support
+# Rehearsal on a laptop: synthetic data, CPU only, no network
+DRY=1 TRAIN_MIN=1 DATA=/tmp/kindic PY=.venv/bin/python bash indic/overnight/run.sh
 
-We offer commercial support for teams integrating Kitten TTS into their products. This includes integration assistance, custom voice development, and enterprise licensing.
+# Real run, from the cluster login node with the venv activated
+export HF_TOKEN=... STAGED_HF_HOME=/path/to/staged/hf
+bash indic/overnight/run.sh
+```
 
-[Contact us](https://docs.google.com/forms/d/e/1FAIpQLSc49erSr7jmh3H2yeqH4oZyRRuXm0ROuQdOgWguTzx6SMdUnQ/viewform?usp=preview) or email info@stellonlabs.com to discuss your requirements.
+The CPU self-check for the training loop needs no GPU and no download:
 
-## Community and Support
+```bash
+.venv/bin/python -m indic.train.selfcheck
+```
 
-- **Discord:** [Join the community](https://discord.com/invite/VJ86W4SURW)
-- **Website:** [kittenml.com](https://kittenml.com)
-- **Custom support:** [Request form](https://docs.google.com/forms/d/e/1FAIpQLSc49erSr7jmh3H2yeqH4oZyRRuXm0ROuQdOgWguTzx6SMdUnQ/viewform?usp=preview)
-- **Email:** info@stellonlabs.com
-- **Issues:** [GitHub Issues](https://github.com/KittenML/KittenTTS/issues)
+## Using KittenTTS itself
+
+For installing and using KittenTTS (built-in voices, voice cloning, expression tags, the ONNX
+models, vLLM), see the upstream repository at
+[github.com/KittenML/KittenTTS](https://github.com/KittenML/KittenTTS). The upstream docs are
+also kept in [docs/](docs/README.md).
+
+## Credits
+
+- Bishwajeet Parhi and Khushiyant Chauhan of [Hopline](https://hopline.co), who did the Indic
+  work in this fork.
+- [KittenML](https://github.com/KittenML/KittenTTS) for KittenTTS and the KittenTTS 2 model.
+- [AI4Bharat](https://huggingface.co/datasets/ai4bharat/indicvoices_r) for the IndicVoices-R dataset.
+- [Sarvam AI](https://huggingface.co/sarvamai/sarvam-1) for the Sarvam-1 tokenizer.
 
 ## License
 
-This project is licensed under the [Apache License 2.0](LICENSE). That covers the code in this
-repository.
+The code in this repository is under the [Apache License 2.0](LICENSE), as in upstream
+KittenTTS. That license covers the code only.
 
-**The models are licensed separately and their terms may differ.** Each model repository carries
-its own licensing, so check the one you intend to use before relying on it — do not assume the
-code's license extends to the weights.
+Models and data have their own terms, and they may differ:
 
-KittenTTS 2 is released under the
-[Stellon Labs Community License](https://huggingface.co/KittenML/kitten-tts-2/blob/main/LICENSE.md)
+- KittenTTS 2 weights are released under the
+  [Stellon Labs Community License](https://huggingface.co/KittenML/kitten-tts-2/blob/main/LICENSE.md).
+  Check it before using the weights or anything derived from them, including a fine-tune.
+- The `sarvamai/sarvam-1` tokenizer is under Sarvam's non-commercial license.
+- IndicVoices-R is distributed by AI4Bharat under its own terms.
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/hopline/footer-dark.png"><img alt="Built by Hopline" src="assets/hopline/footer-light.png" width="100%"></picture></p>

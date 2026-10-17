@@ -1,6 +1,6 @@
 # Preflight report
 
-Generated 2026-10-16 04:42:16
+Generated 2026-10-17 02:43:31
 
 Every check below answers one question about whether this pipeline is
 safe to spend GPU allocation on. A FAIL is a finding, not a crash.
@@ -570,7 +570,7 @@ Status: PASS
       "qat_absmax_passed": true,
       "zero_lr_control_delta": 0.0,
       "zero_lr_control_flat": true,
-      "seconds": 4.02
+      "seconds": 3.83
     },
     {
       "check": "loss_masking",

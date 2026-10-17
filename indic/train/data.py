@@ -179,28 +179,331 @@ class SyntheticDataset(torch.utils.data.Dataset):
 
 
 class ShardDataset(torch.utils.data.Dataset):
-    """Precomputed real shards. Not implemented -- there is no corpus yet.
+    """Training examples assembled from precomputed parquet shards.
 
-    The shape it will have is fixed by `build_example` above, and by step 0.4 of
-    the training plan: S3 codec tokens, pyannote embeddings and text ids are all
-    computed offline, so a shard row needs no audio library at train time. One
-    row is:
+    The shards hold one row per *utterance* (see `shard_schema`), not one per
+    training example: codec tokens, speaker embeddings and text ids are all
+    computed offline, so nothing here touches audio. What this class adds is the
+    part that must not be frozen at preprocessing time -- which utterance serves
+    as the reference for which target.
 
-        text_ids             target text, Qwen3 ids, add_special_tokens=False
-        audio_tokens         target S3 codec ids, 0-based (not offset)
-        reference_text_ids   a *different* utterance by the same speaker
-        reference_audio      that utterance's codec ids, 0-based
-        speaker_embedding    float32[512], unit norm, from the reference clip
-        emotion_ids          optional, tokenized "{emo: 1}" control
+    **Pairing happens here, per epoch.** The reference is a different utterance
+    by the same speaker, drawn from `(seed, epoch, index)`, so it is identical
+    across ranks and after a restart but varies between epochs. Freezing the
+    pairing on disk would show the model one reference per target forever; this
+    costs nothing and is free regularisation.
 
-    Deliberately a stub rather than a guess: writing a reader against an
-    imagined schema is how the reader and the shard writer end up disagreeing.
+    **Everything is held in memory, deliberately.** 900 hours is about 325k
+    utterances: ~325 MB of codec tokens, ~41 MB of text ids and ~665 MB of
+    speaker embeddings, so roughly 1 GB -- nothing on a node with 32 GB, and it
+    buys true random access, which a row-group reader cannot give a shuffling
+    sampler without thrashing. Ragged columns are stored as one flat buffer plus
+    offsets rather than a list of arrays, because 325k small Python objects cost
+    more than the data. A corpus ten times this size needs the lazy path
+    instead; `float16` embeddings halve the largest term first.
     """
 
-    def __init__(self, shards):
-        raise NotImplementedError(
-            "ShardDataset has no corpus to read yet. Build shards per step 0 of "
-            f"docs/indic/training.md, then implement this against them: {shards}")
+    def __init__(self, shards, token_map, tokenizer=None, *,
+                 reference_probability=0.8, reference_max_tokens=250,
+                 max_tokens=None, min_audio_tokens=25, max_audio_tokens=750,
+                 max_cer=0.15, languages=None, language_temperature=0.0,
+                 max_epochs_per_language=4, seed=0, epoch=0,
+                 embedding_dtype="float32"):
+        from indic.train.shard_schema import check_compatible
+
+        paths = _resolve_shards(shards)
+        for path in paths:
+            check_compatible(path, tokenizer)
+
+        self.token_map = token_map
+        self.reference_probability = reference_probability
+        self.reference_max_tokens = reference_max_tokens
+        self.max_tokens = max_tokens
+        self.seed = seed
+
+        self._load(paths, embedding_dtype)
+        self._keep = self._filter(min_audio_tokens, max_audio_tokens, max_cer,
+                                  languages)
+        self._by_speaker = self._index_speakers()
+        self.language_temperature = language_temperature
+        self.max_epochs_per_language = max_epochs_per_language
+        self.set_epoch(epoch)
+
+    # ── loading ───────────────────────────────────────────────────────────
+    def _load(self, paths, embedding_dtype):
+        """Read every shard into flat buffers once."""
+        import pyarrow.parquet as pq
+
+        text_flat, text_off = [], [0]
+        audio_flat, audio_off = [], [0]
+        embeddings = []
+        self.utt_id, self.language, self.speaker_id, self.emotion = [], [], [], []
+        cer, duration = [], []
+
+        for path in paths:
+            table = pq.read_table(str(path))
+            self.utt_id += table["utt_id"].to_pylist()
+            self.language += table["language"].to_pylist()
+            self.speaker_id += table["speaker_id"].to_pylist()
+            self.emotion += table["emotion"].to_pylist()
+            cer += table["cer"].to_pylist()
+            duration += table["duration_s"].to_pylist()
+            for column, flat, offsets in (("text_ids", text_flat, text_off),
+                                          ("audio_tokens", audio_flat, audio_off)):
+                for row in table[column]:
+                    values = row.values.to_numpy(zero_copy_only=False)
+                    flat.append(values.astype(np.int32, copy=False))
+                    offsets.append(offsets[-1] + len(values))
+            embeddings.append(
+                np.asarray(table["speaker_embedding"].to_numpy(zero_copy_only=False)
+                           .tolist(), dtype=embedding_dtype))
+
+        self.text_flat = np.concatenate(text_flat) if text_flat else np.zeros(0, np.int32)
+        self.audio_flat = np.concatenate(audio_flat) if audio_flat else np.zeros(0, np.int32)
+        self.text_off = np.asarray(text_off, dtype=np.int64)
+        self.audio_off = np.asarray(audio_off, dtype=np.int64)
+        self.embeddings = np.concatenate(embeddings) if embeddings else np.zeros((0, 512))
+        self.cer = np.asarray(cer, dtype=np.float32)
+        self.duration_s = np.asarray(duration, dtype=np.float32)
+        self.n_rows = len(self.utt_id)
+
+    # Character error rate of *human* recordings through the same recognizer,
+    # per language. A single absolute threshold is the wrong filter: a
+    # recognizer that scores real Tamil speakers at 4.87% and real Marathi
+    # speakers at 2.08% is applying very different strictness to the two
+    # languages, so a flat 15% cut keeps clips up to 3x the floor in Tamil and
+    # 7x in Marathi. Published floors, to be re-measured for our own decoder and
+    # normalizer before they are relied on.
+    ASR_FLOOR_CER = {"ta": 0.0487, "hi": 0.0521, "te": 0.0307, "mr": 0.0208,
+                     "bn": 0.0300, "en": 0.0133}
+    FLOOR_MULTIPLE = 3.0
+
+    def _filter(self, min_audio, max_audio, max_cer, languages):
+        """Row indices worth training on.
+
+        A clip too short carries no prosody and a clip too long blows the token
+        budget; `cer` is the preprocessing job's own ASR agreement score, and
+        -1 means it was never measured, which must not be read as perfect.
+
+        The error-rate cut is taken relative to each language's own floor rather
+        than as one absolute number, so the filter is equally strict everywhere.
+        `max_cer` becomes the ceiling on that ratio when it is given as a
+        multiple, or stays absolute for a language with no published floor.
+        """
+        lengths = np.diff(self.audio_off)
+        keep = (lengths >= min_audio) & (lengths <= max_audio)
+        measured = self.cer >= 0
+        thresholds = np.array([
+            min(max_cer, self.ASR_FLOOR_CER[lang] * self.FLOOR_MULTIPLE)
+            if lang in self.ASR_FLOOR_CER else max_cer
+            for lang in self.language])
+        keep &= ~measured | (self.cer <= thresholds)
+        if languages:
+            wanted = set(languages)
+            keep &= np.array([lang in wanted for lang in self.language], dtype=bool)
+        return np.nonzero(keep)[0]
+
+    def _index_speakers(self):
+        """speaker -> the kept rows belonging to them, for reference pairing."""
+        by_speaker = {}
+        for row in self._keep:
+            by_speaker.setdefault(self.speaker_id[row], []).append(int(row))
+        return {k: np.asarray(v, dtype=np.int64) for k, v in by_speaker.items()}
+
+    # ── epoch state ───────────────────────────────────────────────────────
+    def set_epoch(self, epoch):
+        """Re-pair references and re-balance languages for `epoch`.
+
+        Call it from the training loop exactly as `DistributedSampler.set_epoch`
+        is called, and before the sampler, since this changes `len(self)`.
+        """
+        self.epoch = int(epoch)
+        self._order = self._resample_languages()
+
+    def _resample_languages(self):
+        """Temperature sampling across languages, with a hard repeat cap.
+
+        With 175 hours of Hindi against 9 of Tamil, natural sampling shows the
+        model Tamil in one batch out of twenty, and Tamil is exactly the language
+        this project exists to fix. Temperature `t` samples language `l` in
+        proportion to `count_l ** t`: 1.0 is the natural distribution, 0.0 is
+        uniform across languages.
+
+        **The default is 0.0, not the 0.3 that the multilingual-text literature
+        would suggest.** Both controlled sweeps on *speech* go flatter than text
+        practice: with exact uniform sampling over four languages, Tamil WER went
+        139.96 -> 39.19 while English and Mandarin also improved, so the flat
+        setting was not paid for by the head languages.
+
+        **`max_epochs_per_language` is the part that makes flat sampling safe.**
+        Uniform sampling over a 20:1 imbalance means passing over the small
+        language twenty times per pass over the large one, and repeating a small
+        fraction of the data very many times can cost as much as halving the
+        model -- a harm that shows up specifically at large model size and long
+        training, which is us. The cap bounds how often any row may repeat in one
+        epoch; the shortfall is left unfilled rather than redistributed, because
+        redistributing it would push some other language past its own cap.
+        """
+        buckets = {}
+        for row in self._keep:
+            buckets.setdefault(self.language[row], []).append(int(row))
+        counts = {lang: len(rows) for lang, rows in buckets.items()}
+        if self.language_temperature >= 1.0 and not self._capped(counts):
+            return self._keep.copy()
+
+        weights = {lang: n ** self.language_temperature for lang, n in counts.items()}
+        total_weight = sum(weights.values())
+        target_total = sum(counts.values())
+        rng = np.random.default_rng([self.seed, 0x5A17, self.epoch])
+        order, self.capped_languages = [], {}
+        for lang, rows in buckets.items():
+            want = int(round(target_total * weights[lang] / total_weight))
+            ceiling = len(rows) * self.max_epochs_per_language
+            if want > ceiling:
+                self.capped_languages[lang] = {"wanted": want, "capped_to": ceiling,
+                                               "rows": len(rows)}
+                want = ceiling
+            if want <= 0:
+                continue
+            order.append(rng.choice(rows, size=want,
+                                    replace=want > len(rows)).astype(np.int64))
+        return np.concatenate(order) if order else self._keep.copy()
+
+    def _capped(self, counts):
+        """True when any language would exceed its repeat ceiling."""
+        if not counts or not self.max_epochs_per_language:
+            return False
+        target_total = sum(counts.values())
+        weights = {lang: n ** self.language_temperature for lang, n in counts.items()}
+        total_weight = sum(weights.values())
+        return any(target_total * weights[lang] / total_weight
+                   > n * self.max_epochs_per_language for lang, n in counts.items())
+
+    # ── access ────────────────────────────────────────────────────────────
+    def __len__(self):
+        return len(self._order)
+
+    def _text(self, row):
+        return self.text_flat[self.text_off[row]:self.text_off[row + 1]].tolist()
+
+    def _audio(self, row):
+        return self.audio_flat[self.audio_off[row]:self.audio_off[row + 1]].tolist()
+
+    def _pick_reference(self, row, rng):
+        """A different utterance by the same speaker, or None.
+
+        None when the speaker has only this one utterance -- a single-utterance
+        speaker cannot supply a reference that is not the target, and using the
+        target as its own reference teaches copying.
+        """
+        candidates = self._by_speaker.get(self.speaker_id[row])
+        if candidates is None or len(candidates) < 2:
+            return None
+        choice = int(rng.integers(0, len(candidates) - 1))
+        # Skip over the target itself without resampling, so the draw is uniform
+        # over the other utterances rather than rejection-sampled.
+        pick = int(candidates[choice])
+        return int(candidates[-1]) if pick == row else pick
+
+    def __getitem__(self, index):
+        row = int(self._order[index])
+        # Keyed on the row rather than on `index`: with oversampling the same
+        # row appears several times in one epoch, and keying on the position
+        # would give every copy a different reference, which is what we want --
+        # so the position is mixed in too.
+        rng = np.random.default_rng([self.seed, self.epoch, row, index])
+
+        reference = self._pick_reference(row, rng)
+        use_reference = reference is not None and rng.random() < self.reference_probability
+
+        reference_text = reference_audio = None
+        if use_reference:
+            reference_text = self._text(reference)
+            reference_audio = self._audio(reference)
+            if self.reference_max_tokens and len(reference_audio) > self.reference_max_tokens:
+                # Too long: train this target without a reference. Truncating the
+                # audio would leave the full transcript describing speech that is
+                # no longer in the prompt.
+                reference_text = reference_audio = None
+
+        audio = self._audio(row)
+        input_ids, labels = build_example(
+            self.token_map, self._text(row), audio,
+            reference_text_ids=reference_text,
+            reference_audio_tokens=reference_audio)
+
+        if self.max_tokens and len(input_ids) > self.max_tokens:
+            # Second line of defence, after the length filter. Shedding the
+            # reference keeps the target intact; the alternative is an example
+            # that silently blows the step's memory budget.
+            input_ids, labels = build_example(self.token_map, self._text(row), audio)
+
+        # The embedding comes from the *reference* clip, matching inference,
+        # where it is computed from whatever clip the caller cloned. Falling back
+        # to the target's own embedding when there is no reference would leak the
+        # target into its own conditioning.
+        source = reference if reference is not None else row
+        return {
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
+            "labels": torch.tensor(labels, dtype=torch.long),
+            "speaker_embedding": torch.from_numpy(
+                self.embeddings[source].astype(np.float32)),
+            "speaker": self.speaker_id[row],
+            "language": self.language[row],
+            "utt_id": self.utt_id[row],
+        }
+
+    def describe(self):
+        """Counts a training log should record before the first step."""
+        from collections import Counter
+
+        kept = Counter(self.language[r] for r in self._keep)
+        sampled = Counter(self.language[int(r)] for r in self._order)
+        hours = {lang: round(float(sum(self.duration_s[r] for r in self._keep
+                                       if self.language[r] == lang)) / 3600, 1)
+                 for lang in kept}
+        return {
+            "rows_total": self.n_rows,
+            "rows_kept": int(len(self._keep)),
+            "rows_per_epoch": int(len(self._order)),
+            "speakers": len(self._by_speaker),
+            "single_utterance_speakers": sum(
+                1 for v in self._by_speaker.values() if len(v) < 2),
+            "hours_by_language": hours,
+            "kept_by_language": dict(kept),
+            "sampled_by_language": dict(sampled),
+            "language_temperature": self.language_temperature,
+            "max_epochs_per_language": self.max_epochs_per_language,
+            # Non-empty means a language wanted more repeats than the cap allows:
+            # the mix is flatter than requested, and that is worth seeing in a
+            # training log rather than discovering from a loss curve.
+            "capped_languages": getattr(self, "capped_languages", {}),
+            "epoch": self.epoch,
+        }
+
+
+def _resolve_shards(shards):
+    """Accept a directory, a glob, a single file, or a list of any of those."""
+    import glob
+    import pathlib
+
+    if isinstance(shards, (str, pathlib.Path)):
+        shards = [shards]
+    out = []
+    for entry in shards:
+        path = pathlib.Path(entry)
+        if path.is_dir():
+            out += sorted(path.glob("*.parquet"))
+        elif any(ch in str(entry) for ch in "*?["):
+            out += sorted(pathlib.Path(p) for p in glob.glob(str(entry)))
+        else:
+            out.append(path)
+    if not out:
+        raise FileNotFoundError(f"no parquet shards matched {shards!r}")
+    missing = [p for p in out if not p.exists()]
+    if missing:
+        raise FileNotFoundError(f"shards do not exist: {missing}")
+    return out
 
 
 class Collator:

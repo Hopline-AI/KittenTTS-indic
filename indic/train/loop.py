@@ -45,7 +45,8 @@ import torch.nn as nn
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from indic.train import load_kittentts2
-from indic.train.data import Collator, SyntheticDataset, tiny_token_map
+from indic.train.data import (Collator, ShardDataset, SyntheticDataset,
+                              tiny_token_map)
 from indic.train.qat import load_released_state, wrap_ternary
 
 _tokens = load_kittentts2("tokens")
@@ -136,6 +137,33 @@ def toy_model(token_map, hidden=128, layers=2, dtype=torch.float32, seed=0):
                                             attn_implementation="sdpa")
 
 
+def read_safetensors(path):
+    """`safetensors.torch.load_file` without mmap, one tensor at a time.
+
+    ponytail: eX3 (login node and g003) refuses to mmap the 3.5 GB bf16 file
+    with ENOMEM; plain reads need only the tensors' own memory.
+    """
+    import json
+    import struct
+
+    dtypes = {"BF16": torch.bfloat16, "F16": torch.float16, "F32": torch.float32,
+              "F64": torch.float64, "I64": torch.int64, "I32": torch.int32,
+              "I16": torch.int16, "I8": torch.int8, "U8": torch.uint8, "BOOL": torch.bool}
+    state = {}
+    with open(path, "rb") as f:
+        (n,) = struct.unpack("<Q", f.read(8))
+        header = json.loads(f.read(n))
+        header.pop("__metadata__", None)
+        for name, info in header.items():
+            start, end = info["data_offsets"]
+            f.seek(8 + n + start)
+            buf = bytearray(f.read(end - start))
+            tensor = (torch.frombuffer(buf, dtype=dtypes[info["dtype"]]) if buf else
+                      torch.empty(0, dtype=dtypes[info["dtype"]]))
+            state[name] = tensor.reshape(info["shape"])
+    return state
+
+
 def released_model(checkpoint_dir, dtype=torch.bfloat16, weights=None):
     """Load the released 28-layer checkpoint, weights and speaker head together.
 
@@ -169,8 +197,7 @@ def released_model(checkpoint_dir, dtype=torch.bfloat16, weights=None):
     if weights.name.endswith("-ternary.safetensors"):
         state = load_released_state(weights)
     else:
-        from safetensors.torch import load_file
-        state = load_file(str(weights))
+        state = read_safetensors(weights)
 
     config = AutoConfig.from_pretrained(str(checkpoint_dir))
     with no_init_weights():
@@ -453,6 +480,36 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, map_location="c
     return state["step"]
 
 
+def export_repo(model, checkpoint, out):
+    """Write a repo dir `KittenTTS2` can load: the source repo with a bf16 lm/.
+
+    LoRA is merged and QAT shadows are folded to their ternary values first, so
+    every mode lands in the same plain-bf16 format `build_sarvam_vocab` writes.
+    Destructive to `model`; call it last.
+    """
+    import shutil
+    from safetensors.torch import save_file
+    from indic.train.qat import unwrap_ternary
+
+    module = model.module if hasattr(model, "module") else model
+    if hasattr(module, "merge_and_unload"):
+        module = module.merge_and_unload()
+    unwrap_ternary(module)
+    source, out = pathlib.Path(checkpoint).parent, pathlib.Path(out)
+    shutil.copytree(source, out, dirs_exist_ok=True,
+                    ignore=lambda d, names: [n for n in names if n == "cpp" or (
+                        pathlib.Path(d).name == "lm" and n.endswith(".safetensors"))])
+    state = {k: v.detach().to(torch.bfloat16).contiguous().cpu()
+             for k, v in module.state_dict().items() if k != "lm_head.weight"}
+    save_file(state, str(out / "lm" / "model.safetensors"), metadata={"format": "pt"})
+    config = json.loads((out / "config.json").read_text())
+    for stale in ("lm_packed", "lm_emb4", "cpp"):
+        config.pop(stale, None)
+    config["default_weights"] = "full"  # the loader's name for plain lm/model*.safetensors
+    (out / "config.json").write_text(json.dumps(config, indent=2))
+    return out
+
+
 class JsonlLogger:
     """One JSON object per line, flushed every write.
 
@@ -504,11 +561,19 @@ def run_steps(model, batches, optimizer, scheduler, args, device, start_step=0,
 
     history = []
     model.train()
+    budget_end = time.time() + 60 * getattr(args, "time_budget_min", 0) \
+        if getattr(args, "time_budget_min", 0) else None
     for step in range(start_step, args.steps):
+        if budget_end is not None and time.time() > budget_end:
+            print(f"time budget reached at step {step}; stopping", flush=True)
+            break
         optimizer.zero_grad(set_to_none=True)
         total = 0.0
+        started, tokens, slots = time.perf_counter(), 0, 0
         for micro in range(args.accum):
             batch = next(batches)
+            tokens += int(batch["attention_mask"].sum())
+            slots += batch["attention_mask"].numel()
             # Every micro-batch but the last skips DDP's all-reduce. Without
             # this, accumulating N micro-batches costs N gradient syncs across
             # the whole model to produce one update, which on eight GPUs is most
@@ -526,9 +591,22 @@ def run_steps(model, batches, optimizer, scheduler, args, device, start_step=0,
         optimizer.step()
         scheduler.step()
 
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()  # so step_s is GPU time, not launch time
+        step_s = time.perf_counter() - started
+        world = dist.get_world_size() if dist.is_initialized() else 1
+
         loss_value = total / args.accum
+        # Throughput is what the thesis compares across GPUs: tokens are the
+        # real (unpadded) ones, summed over ranks; pad_frac is compute wasted
+        # on padding. Step 0 includes warm-up, so skip it when averaging.
         record = {"step": step, "loss": loss_value, "grad_norm": grad_norm,
-                  "lr": scheduler.get_last_lr()[0], "time": time.time()}
+                  "lr": scheduler.get_last_lr()[0], "time": time.time(),
+                  "step_s": step_s, "tokens": tokens * world,
+                  "tok_per_s": tokens * world / step_s,
+                  "pad_frac": 1 - tokens / max(slots, 1),
+                  "max_mem_gb": (torch.cuda.max_memory_allocated() / 2**30
+                                 if torch.cuda.is_available() else None)}
         history.append(loss_value)
         if logger is not None and (step % max(args.log_every, 1) == 0
                                    or step == args.steps - 1):
@@ -537,16 +615,26 @@ def run_steps(model, batches, optimizer, scheduler, args, device, start_step=0,
             on_step(step, record)
         if (args.save_every and args.out and (step + 1) % args.save_every == 0
                 and (not dist.is_initialized() or dist.get_rank() == 0)):
-            save_checkpoint(pathlib.Path(args.out) / f"step{step + 1}.pt",
-                            model, optimizer, scheduler, step + 1, args)
+            # ponytail: one rolling latest.pt (each is several GB); keep stepN copies by hand
+            latest = pathlib.Path(args.out) / "latest.pt"
+            save_checkpoint(latest.with_suffix(".tmp"), model, optimizer, scheduler,
+                            step + 1, args)
+            os.replace(latest.with_suffix(".tmp"), latest)
     return history
 
 
-def cycle(loader):
-    """An endless stream of batches, reshuffled each pass."""
+def cycle(loader, epoch=0):
+    """An endless stream of batches, reshuffled each pass.
+
+    Dataset before sampler: `ShardDataset.set_epoch` changes `len(dataset)`.
+    """
     while True:
+        for target in (loader.dataset, loader.sampler):
+            if hasattr(target, "set_epoch"):
+                target.set_epoch(epoch)
         for batch in loader:
             yield batch
+        epoch += 1
 
 
 def main(argv=None):
@@ -568,6 +656,12 @@ def main(argv=None):
         config_path = checkpoint_dir.parent / "config.json"
         token_map = _tokens.TokenMap.from_config(json.loads(config_path.read_text()))
         model = released_model(checkpoint_dir, dtype=dtype)
+        if args.shard_tokenizer is None:
+            # The checkpoint decides which tokenizer its text rows belong to; a
+            # Sarvam shard on the released Qwen table would index the wrong rows
+            # without any error.
+            args.shard_tokenizer = json.loads(config_path.read_text()).get(
+                "tokenizer_source", "KittenML/kitten-tts-2")
 
     if args.mode == "lora":
         model = apply_lora(model, rank=args.lora_rank, alpha=args.lora_alpha)
@@ -587,15 +681,32 @@ def main(argv=None):
         # silently comes back zero.
         model.enable_input_require_grads()
 
-    dataset = SyntheticDataset(token_map, size=args.dataset_size,
-                               speaker_dim=args.speaker_dim, seed=args.seed)
+    if args.shards:
+        # Real corpus. The reader holds the whole thing in memory as flat
+        # buffers (about 1 GB for 125 hours), so every rank pays that once --
+        # cheap next to the model, and it buys true random access for the
+        # sampler.
+        dataset = ShardDataset(
+            args.shards, token_map, tokenizer=args.shard_tokenizer,
+            reference_probability=args.reference_probability,
+            language_temperature=args.language_temperature,
+            max_epochs_per_language=args.max_epochs_per_language,
+            languages=args.languages.split(",") if args.languages else None,
+            max_tokens=args.max_tokens or None, seed=args.seed)
+        if rank == 0:
+            print(json.dumps(dataset.describe(), indent=2, ensure_ascii=False),
+                  flush=True)
+    else:
+        dataset = SyntheticDataset(token_map, size=args.dataset_size,
+                                   speaker_dim=args.speaker_dim, seed=args.seed)
     sampler = None
     if world_size > 1:
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset, num_replicas=world_size, rank=rank, shuffle=True, seed=args.seed)
     loader = torch.utils.data.DataLoader(
         dataset, batch_size=args.batch_size, sampler=sampler, shuffle=sampler is None,
-        collate_fn=Collator(), drop_last=True)
+        collate_fn=Collator(), drop_last=True,
+        num_workers=args.workers, persistent_workers=args.workers > 0)
 
     if world_size > 1:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -625,10 +736,13 @@ def main(argv=None):
     history = run_steps(model, cycle(loader), optimizer, scheduler, args, device,
                         start_step=start_step, logger=logger)
     if rank == 0:
-        print(f"first loss {history[0]:.4f}  last loss {history[-1]:.4f}")
+        if history:  # empty when a requeue resumes an already-finished run
+            print(f"first loss {history[0]:.4f}  last loss {history[-1]:.4f}")
         if args.out:
             save_checkpoint(pathlib.Path(args.out) / "final.pt", model, optimizer,
                             scheduler, args.steps, args)
+            if not args.toy:
+                print(f"exported -> {export_repo(model, args.checkpoint, pathlib.Path(args.out) / 'export')}")
     logger.close()
     return history
 
@@ -658,6 +772,20 @@ def parse_args(argv=None):
     ap.add_argument("--grad-checkpointing", action="store_true")
     ap.add_argument("--lora-rank", type=int, default=64)
     ap.add_argument("--lora-alpha", type=int, default=128)
+    ap.add_argument("--shards", help="parquet shard directory or glob; omit for "
+                                     "the synthetic dataset")
+    ap.add_argument("--shard-tokenizer", default=None,
+                    help="refuse shards whose text ids came from another "
+                         "tokenizer, since the ids would mean different strings")
+    ap.add_argument("--languages", default="", help="comma-separated subset")
+    ap.add_argument("--language-temperature", type=float, default=0.0,
+                    help="0 = uniform across languages, 1 = natural distribution")
+    ap.add_argument("--max-epochs-per-language", type=int, default=4,
+                    help="repeat ceiling that makes flat sampling safe")
+    ap.add_argument("--reference-probability", type=float, default=0.8)
+    ap.add_argument("--max-tokens", type=int, default=0,
+                    help="drop the reference prefix past this sequence length")
+    ap.add_argument("--workers", type=int, default=2, help="dataloader workers")
     ap.add_argument("--dataset-size", type=int, default=256)
     ap.add_argument("--speaker-dim", type=int, default=512)
     ap.add_argument("--seed", type=int, default=0)
@@ -666,6 +794,8 @@ def parse_args(argv=None):
     ap.add_argument("--ddp-find-unused", action="store_true",
                     help="only needed if a mode leaves a trainable parameter off the graph")
     ap.add_argument("--resume", help="checkpoint to continue from")
+    ap.add_argument("--time-budget-min", type=float, default=0,
+                    help="stop after this many minutes, then save and export as usual")
     ap.add_argument("--out", help="directory for checkpoints and train.jsonl")
     args = ap.parse_args(argv)
     if args.amp == "auto":

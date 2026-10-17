@@ -267,11 +267,13 @@ def main():
         return
 
     import torch
-    from safetensors.torch import load_file, save_file
+    from safetensors.torch import save_file
+
+    from indic.train.loop import read_safetensors
 
     src_tok = AutoTokenizer.from_pretrained(source / "lm")
     print("\nloading lm/model.safetensors ...", flush=True)
-    state = load_file(str(source / "lm" / "model.safetensors"))
+    state = read_safetensors(source / "lm" / "model.safetensors")
     embed_key = next(k for k in state if k.endswith("embed_tokens.weight"))
     old_embed = state[embed_key]
 
@@ -298,7 +300,7 @@ def main():
     # `weights="packed"` from silently loading a checkpoint with the old vocab.
     for stale in ("lm_packed", "lm_emb4", "cpp"):
         config.pop(stale, None)
-    config["default_weights"] = "bf16"
+    config["default_weights"] = "full"  # the loader's name for plain lm/model*.safetensors
     config["tokenizer_source"] = args.tokenizer
     config["embedding_init"] = args.init
     json.dump(config, open(out / "config.json", "w"), indent=2)

@@ -1,5 +1,7 @@
 # Runbook: first day on the cluster
 
+> **Status:** this experiment is concluded (17 October 2026) and kept for reference only; the code is not maintained. See [the final report](REPORT.md) for what was run and what we found.
+
 Ordered so that the cheapest things that could invalidate the plan run first.
 Every step is independent of the training loop, so none of it is blocked on code
 that does not exist yet.
@@ -189,7 +191,6 @@ checkpoint's 15% sparsity matches neither textbook rule, and the question is ope
 
 ```bash
 .venv/bin/python -m indic.preflight              # run everything, in order
-.venv/bin/python -m indic.overnight --deadline-hours 8   # keep sweeping unattended
 ```
 
 `indic/data/PREFLIGHT_REPORT.md` is the output. A **FAIL is a finding**, not a

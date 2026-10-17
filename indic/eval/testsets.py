@@ -61,11 +61,45 @@ FLEURS_SAMPLE_RATE = 16000
 # A cloning reference wants a few seconds of one speaker: too short and the voice
 # is not determined, too long and it crowds the prompt (model.py budgets the
 # reference clip in codec tokens at 25 Hz).
+# "dev+test", not "dev", and this is a power requirement rather than a preference.
+# The six-way parallel intersection of FLEURS dev is 118 sentences, which resolves
+# no CER difference smaller than 2.3 points (3.1 under Holm correction across the
+# arms we are comparing) -- larger than the differences between the architectures
+# the benchmark exists to choose between. dev and test are disjoint, so taking
+# both gives 336 parallel sentences, and per language 391 (hi) to 500 (en), which
+# brings the Holm-corrected resolution to about 1.5-1.8 points.
+#
+# FLEURS train is larger still (997 parallel) and is deliberately NOT used: it is
+# what Indic TTS models are trained on, so scoring on it would be scoring on
+# training data for every baseline we compare against.
+DEFAULT_SPLIT = "dev+test"
+
+
+def split_parts(split):
+    """A split name to the FLEURS splits it covers.
+
+    "dev+test" is a set name here, not a FLEURS split: the archives, the TSVs and
+    the extraction directories are all per-split, so everything that touches disk
+    loops over the parts. Written once because three separate functions need it
+    and because a reader that silently treated "dev+test" as a missing split
+    would download nothing and report an empty test set.
+    """
+    return [part for part in str(split).split("+") if part]
+
 REFERENCE_SECONDS = (5.0, 30.0)
 # Several reference clips rather than one, assigned round-robin, so a result is not
 # an accident of one speaker's recording. FLEURS carries no speaker id, so this
 # gives varied speakers without being able to say how many.
-REFERENCE_POOL = 4
+#
+# 32 rather than 4, and the number is a statistical requirement rather than a
+# preference. Utterances sharing a reference clip are correlated, so the design
+# effect is `1 + (m - 1) * ICC` for m utterances per clip. At 400 utterances over
+# 4 clips that is m = 100, and at a mild ICC of 0.1 the design effect is 10.9 --
+# 400 utterances buy the power of 37. Worse, the arm x speaker interaction would
+# be estimated from four points, so a single well-cloned voice could decide a
+# comparison between architectures. At 32 clips m drops to 12.5 and the design
+# effect to 2.2.
+REFERENCE_POOL = 32
 
 # Past text.py's 380-character chunk budget, which is where the splitter stops
 # finding sentence ends and falls through to a hard `sentence[:max_chars]` cut.
@@ -116,19 +150,22 @@ def fleurs_audio_rows(code, split="dev"):
 
     from huggingface_hub import hf_hub_download
 
-    path = hf_hub_download(FLEURS_REPO, f"data/{LANGUAGES[code].fleurs}/{split}.tsv",
-                           repo_type="dataset")
     rows = {}
-    with open(path, encoding="utf-8") as handle:
-        for row in csv.reader(handle, delimiter="\t"):
-            # First recording of each sentence wins, matching `load_fleurs` — the
-            # text it returns for an id must belong to the clip picked here.
-            if len(row) >= 6 and row[0] not in rows:
-                try:
-                    seconds = int(row[5]) / FLEURS_SAMPLE_RATE
-                except ValueError:
-                    seconds = None
-                rows[row[0]] = (row[1], seconds)
+    for part in split_parts(split):
+        path = hf_hub_download(FLEURS_REPO,
+                               f"data/{LANGUAGES[code].fleurs}/{part}.tsv",
+                               repo_type="dataset")
+        with open(path, encoding="utf-8") as handle:
+            for row in csv.reader(handle, delimiter="\t"):
+                # First recording of each sentence wins, matching `load_fleurs` —
+                # the text it returns for an id must belong to the clip picked
+                # here. Earlier parts win on the rare id present in both.
+                if len(row) >= 6 and row[0] not in rows:
+                    try:
+                        seconds = int(row[5]) / FLEURS_SAMPLE_RATE
+                    except ValueError:
+                        seconds = None
+                    rows[row[0]] = (row[1], seconds)
     return rows
 
 
@@ -145,28 +182,34 @@ def ensure_fleurs_audio(code, split, file_names, cache_dir=None):
 
     from huggingface_hub import hf_hub_download
 
+    # One directory for the whole set rather than one per part: callers get a
+    # single place to read from, and a file belongs to exactly one part's tarball
+    # so there is nothing to disambiguate.
     target = cache_root(cache_dir) / "fleurs" / LANGUAGES[code].fleurs / split
     target.mkdir(parents=True, exist_ok=True)
     wanted = {name for name in file_names if not (target / name).exists()}
     if not wanted:
         return target
 
-    archive = hf_hub_download(
-        FLEURS_REPO, f"data/{LANGUAGES[code].fleurs}/audio/{split}.tar.gz",
-        repo_type="dataset")
-    # Streamed in one pass: the tarball is one gzip member, so seeking to a file
-    # would decompress everything before it anyway.
-    with tarfile.open(archive, mode="r|gz") as tar:
-        for member in tar:
-            name = pathlib.PurePosixPath(member.name).name
-            if not member.isfile() or name not in wanted:
-                continue
-            partial = target / (name + ".partial")
-            partial.write_bytes(tar.extractfile(member).read())
-            partial.rename(target / name)
-            wanted.discard(name)
-            if not wanted:
-                break
+    for part in split_parts(split):
+        if not wanted:
+            break
+        archive = hf_hub_download(
+            FLEURS_REPO, f"data/{LANGUAGES[code].fleurs}/audio/{part}.tar.gz",
+            repo_type="dataset")
+        # Streamed in one pass: the tarball is one gzip member, so seeking to a
+        # file would decompress everything before it anyway.
+        with tarfile.open(archive, mode="r|gz") as tar:
+            for member in tar:
+                name = pathlib.PurePosixPath(member.name).name
+                if not member.isfile() or name not in wanted:
+                    continue
+                partial = target / (name + ".partial")
+                partial.write_bytes(tar.extractfile(member).read())
+                partial.rename(target / name)
+                wanted.discard(name)
+                if not wanted:
+                    break
     if wanted:
         raise FileNotFoundError(
             f"{len(wanted)} file(s) listed in the {code}/{split} TSV are absent from "
@@ -175,7 +218,8 @@ def ensure_fleurs_audio(code, split, file_names, cache_dir=None):
     return target
 
 
-def fleurs_reference_pool(lang, split="dev", cache_dir=None, exclude=(), size=REFERENCE_POOL):
+def fleurs_reference_pool(lang, split=DEFAULT_SPLIT, cache_dir=None,
+                          exclude=(), size=REFERENCE_POOL):
     """Cloning reference clips for a language: [(wav path, transcript), ...].
 
     Longest-first within the 5-30 s window, which is both what the cloning path
@@ -199,7 +243,8 @@ def fleurs_reference_pool(lang, split="dev", cache_dir=None, exclude=(), size=RE
             for _, sentence_id, file_name in chosen]
 
 
-def set_a(lang, split="dev", limit=None, cache_dir=None, pool=REFERENCE_POOL):
+def set_a(lang, split=DEFAULT_SPLIT, limit=None, cache_dir=None,
+          pool=REFERENCE_POOL):
     """Read speech from FLEURS, with a ground-truth recording and a clone reference."""
     ids, corpora = parallel_corpus(ALL, split)
     text = dict(zip(ids, corpora[lang]))
@@ -372,7 +417,8 @@ def set_c(lang, reference=None):
 TESTSETS = ("A", "C")
 
 
-def build(name, lang, split="dev", limit=None, cache_dir=None, reference=None):
+def build(name, lang, split=DEFAULT_SPLIT, limit=None, cache_dir=None,
+          reference=None):
     """A test set by name. Records come back in a fixed order, which sharding relies on."""
     if lang not in LANGUAGES:
         raise ValueError(f"unknown language {lang!r}; known: {sorted(LANGUAGES)}")

@@ -261,3 +261,12 @@ indic/data/kitten-tts-2-*/
 indic/data/*.wav
 indic/data/generated/
 indic/data/overnight.log
+
+# Run outputs: training runs, checkpoints, shards and weights are rebuilt from
+# the commands in indic/QUICKSTART.md and indic/overnight/run.sh.
+/runs/
+/checkpoints/
+/shards/
+*.pt
+*.safetensors
+*.parquet
