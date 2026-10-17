@@ -9,12 +9,14 @@
 #   bash indic/overnight/run.sh                 # real run (checks first, then submits)
 #   DRY=1 DATA=/tmp/k bash indic/overnight/run.sh   # laptop rehearsal, no GPU, no network
 #
+#   RESUME=1 bash indic/overnight/run.sh       # data already prepared: vocab swap, train, eval only
+#
 # Knobs (env): ARM=sarvam|qwen  HOURS=10  TRAIN_MIN=300  BATCH=16  PART=h200q
 #              LANGS="hi:Hindi ta:Tamil ..."  DATA=/global/D1/homes/$USER/kindic-data
 # Morning:     cat $DATA/REPORT.md
 set -euo pipefail
 REPO_DIR=$(cd "$(dirname "$0")/../.." && pwd); cd "$REPO_DIR"
-: "${DRY:=0}" "${ARM:=sarvam}" "${HOURS:=10}" "${TRAIN_MIN:=300}" "${BATCH:=16}" \
+: "${DRY:=0}" "${RESUME:=0}" "${ARM:=sarvam}" "${HOURS:=10}" "${TRAIN_MIN:=300}" "${BATCH:=16}" \
   "${PART:=h200q}" "${PY:=python}" "${DATA:=/global/D1/homes/$USER/kindic-data}"
 # Sarvam-friendly scripts first, so they are prepared first if the night runs short.
 : "${LANGS:=hi:Hindi bn:Bengali ta:Tamil te:Telugu mr:Marathi kn:Kannada ml:Malayalam
@@ -48,6 +50,8 @@ command -v sbatch > /dev/null || { echo "run this on the login node"; exit 1; }
 say "partition $PART time limit: $(sinfo -h -p "$PART" -o %l 2>/dev/null | head -1 || true) (need ~$(( (TRAIN_MIN + 45) / 60 + 6 )) h total across 3 jobs)"
 KITTEN=$(ls -d "$STAGED_HF_HOME"/hub/models--KittenML--kitten-tts-2/snapshots/*/ | head -1)
 [ -n "$KITTEN" ] || { echo "kitten-tts-2 not staged; run indic.hpc.stage_cache download"; exit 1; }
+SARVAM=$(ls -d "$STAGED_HF_HOME"/hub/models--sarvamai--sarvam-1/snapshots/*/ 2>/dev/null | head -1)
+[ "$ARM" = qwen ] || [ -n "$SARVAM" ] || { echo "sarvam-1 tokenizer not staged"; exit 1; }
 
 if [ "$ARM" = sarvam ] && [ ! -f "$KITTEN/lm/model.safetensors" ]; then
   say "fetching bf16 weights the vocab swap reads (3.5 GB, once)"
@@ -59,6 +63,7 @@ hf_hub_download("KittenML/kitten-tts-2", "lm/model.safetensors", revision=sys.ar
 PY
 fi
 
+if [ "$RESUME" != 1 ]; then
 say "probe: 3 Hindi clips from IndicVoices-R (gate + token)"
 "$PY" -m indic.overnight.fetch --lang Hindi --code hi --out "$DATA/smoke" --probe
 say "smoke: real encoders on CPU, offline, 2 clips"
@@ -76,6 +81,18 @@ export HOURS
 printf '%s\n' $LANGS > "$DATA/langs.pairs"
 nohup setsid bash -c 'xargs -P 3 -I{} bash -c '\''p={}; "$PY" -m indic.overnight.fetch --lang "${p#*:}" --code "${p%%:*}" --out "$DATA" --hours "$HOURS"'\'' < "$DATA/langs.pairs"; date '+%F %T' > "$DATA/status/fetch.ok"' \
   > "$DATA/logs/fetch.log" 2>&1 < /dev/null &
+fi
+
+# ── Sarvam vocab swap here, in the foreground, offline like the jobs: a failure
+#    shows up now instead of in a 3 am log. CPU only, a few minutes.
+if [ "$ARM" = sarvam ] && [ ! -f "$DATA/ckpt-sarvam/lm/model.safetensors" ]; then
+  say "Sarvam vocab swap (log: $DATA/logs/vocab.log)"
+  ( eval "$("$PY" -m indic.hpc.stage_cache env --hf-home "$STAGED_HF_HOME")"
+    "$PY" -m indic.vocab.build_sarvam_vocab --source "$KITTEN" --tokenizer "$SARVAM" \
+      --out "$DATA/ckpt-sarvam" --init mean_rescaled ) > "$DATA/logs/vocab.log" 2>&1 \
+    || { tail -25 "$DATA/logs/vocab.log"; echo "vocab swap failed: paste the lines above"; exit 1; }
+  say "vocab swap OK"
+fi
 
 # ── GPU jobs, chained; each runs even if the one before failed (afterany) ──
 submit() {  # stage minutes [dependency]
@@ -84,10 +101,10 @@ submit() {  # stage minutes [dependency]
     -o "$DATA/logs/$1-%j.out" -e "$DATA/logs/$1-%j.err" \
     indic/overnight/stage.sbatch "$1"
 }
-J1=$(submit prepare 300)
+J1=""; [ "$RESUME" = 1 ] || J1=$(submit prepare 300)
 J2=$(submit train $(( TRAIN_MIN + 45 )) "$J1")
 J3=$(submit eval 90 "$J2")
-say "submitted prepare=$J1 train=$J2 eval=$J3"
+say "submitted prepare=${J1:-skipped} train=$J2 eval=$J3"
 cat <<EOF
 
 Done for tonight. Nothing else to run.

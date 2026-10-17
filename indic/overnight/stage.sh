@@ -29,12 +29,6 @@ fi
 LANGS=$(cat "$DATA/langs.txt")
 
 prepare() {
-  local vocab_pid=""
-  if [ "$DRY" != 1 ] && [ "$ARM" = sarvam ] && [ ! -f "$CKPT/lm/model.safetensors" ]; then
-    "$PY" -m indic.vocab.build_sarvam_vocab --source "$KITTEN" --out "$CKPT" \
-      --init mean_rescaled > "$DATA/logs/vocab.log" 2>&1 &
-    vocab_pid=$!
-  fi
   local deadline=$(( $(date +%s) + FETCH_WAIT_MIN * 60 ))
   for code in $LANGS; do
     while [ ! -f "$DATA/manifests/$code.DONE" ] && [ ! -f "$DATA/manifests/$code.FAILED" ]; do
@@ -56,9 +50,6 @@ prepare() {
     done
     echo "[$code] prepared: $(ls "$DATA/shards/train/$code"/*.parquet 2>/dev/null | wc -l) train shard files"
   done
-  if [ -n "$vocab_pid" ]; then
-    wait "$vocab_pid" || fail "Sarvam vocab build (logs/vocab.log)"
-  fi
   ls "$DATA"/shards/train/*/*.parquet > /dev/null 2>&1 || fail "no training shards were written"
 }
 
@@ -70,7 +61,7 @@ train() {
     args+=(--toy --device cpu --batch-size 2 --workers 0 --log-every 1 --save-every 5)
   else
     [ -f "$CKPT/lm/model.safetensors" ] || [ -f "$CKPT/lm/model-ternary.safetensors" ] \
-      || fail "no checkpoint at $CKPT/lm"
+      || fail "no checkpoint at $CKPT/lm (run.sh builds it before submitting)"
     args+=(--checkpoint "$CKPT/lm" --shard-tokenizer "$TOK" --device cuda
            --batch-size "$BATCH" --grad-checkpointing --lr 1e-4 --lr-embed 3e-4
            --warmup 200 --log-every 10 --workers 4 --max-tokens 1200)
