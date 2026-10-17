@@ -1,6 +1,8 @@
 # KittenTTS-indic: research and plan
 
-Working notes for adding Indian-language support to KittenTTS 2. This is a brainstorming branch, so edit freely.
+> **Status:** this experiment is concluded (17 October 2026) and kept for reference only; the code is not maintained. See [the final report](REPORT.md) for what was run and what we found.
+
+Working notes for adding Indian-language support to KittenTTS 2. These are the early notes from 15 October 2026, before the run.
 
 | File | What's in it |
 |---|---|
