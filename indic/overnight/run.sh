@@ -83,12 +83,14 @@ nohup setsid bash -c 'xargs -P 3 -I{} bash -c '\''p={}; "$PY" -m indic.overnight
   > "$DATA/logs/fetch.log" 2>&1 < /dev/null &
 fi
 
-# ── Sarvam vocab swap here, in the foreground, offline like the jobs: a failure
-#    shows up now instead of in a 3 am log. CPU only, a few minutes.
+# ── Sarvam vocab swap in the foreground, offline like the jobs: a failure shows
+#    up now instead of in a 3 am log. On a compute node via srun: the login node
+#    cannot mmap the 3.5 GB weights. A few minutes once the node is granted.
 if [ "$ARM" = sarvam ] && [ ! -f "$DATA/ckpt-sarvam/lm/model.safetensors" ]; then
-  say "Sarvam vocab swap (log: $DATA/logs/vocab.log)"
+  say "Sarvam vocab swap on a $PART node, waits for the queue (log: $DATA/logs/vocab.log)"
   ( eval "$("$PY" -m indic.hpc.stage_cache env --hf-home "$STAGED_HF_HOME")"
-    "$PY" -m indic.vocab.build_sarvam_vocab --source "$KITTEN" --tokenizer "$SARVAM" \
+    srun -p "$PART" --gres=gpu:1 --cpus-per-task=8 --time=30 --job-name=kindic-vocab \
+      "$PY" -m indic.vocab.build_sarvam_vocab --source "$KITTEN" --tokenizer "$SARVAM" \
       --out "$DATA/ckpt-sarvam" --init mean_rescaled ) > "$DATA/logs/vocab.log" 2>&1 \
     || { tail -25 "$DATA/logs/vocab.log"; echo "vocab swap failed: paste the lines above"; exit 1; }
   say "vocab swap OK"
